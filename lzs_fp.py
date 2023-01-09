@@ -20,8 +20,8 @@ driver.get(login_url)
 
 time.sleep(1)
 
-yourID = '2020080172'
-yourPW = 'James4976!!'
+yourID = '**********'
+yourPW = '***********'
 
 driver.find_element(by = By.XPATH, value = '//*[@name="i_user"]').send_keys(yourID)
 driver.find_element(by = By.XPATH, value = '//*[@name="i_pass"]').send_keys(yourPW)
