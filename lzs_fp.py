@@ -2,6 +2,10 @@ from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
+import chromedriver_autoinstaller
+
+chromedriver_autoinstaller.install()
+
 from bs4 import BeautifulSoup
 import time
 import codecs
@@ -12,16 +16,26 @@ from time import strftime
 login_url = 'https://learn.tsinghua.edu.cn/f/login'
 
 options = webdriver.ChromeOptions()
-options.add_experimental_option('excludeSwitches', ['enable-logging'])
+options.add_experimental_option('detach', True) #브라우저 바로 닫힘 방지
+options.add_experimental_option('excludeSwitches', ['enable-logging']) #불필요한 메시지 제거
 
 path = r"C:\Users\james\Desktop\chromedriver_win32\chromedriver.exe"
-driver = webdriver.Chrome(executable_path = path, options = options)
+
+# driver = webdriver.Chrome(executable_path = path, options = options)
+#cd = ChromeDriverManager(path="DRIVER",).install()
+#service = Service(cd)
+#print(cd)
+#driver = webdriver.Chrome(service = service, options = options)
+
+driver = webdriver.Chrome()
+
+
 driver.get(login_url)
 
 time.sleep(1)
 
-yourID = '**********'
-yourPW = '***********'
+yourID = '2020080172'
+yourPW = 'James4976!!'
 
 driver.find_element(by = By.XPATH, value = '//*[@name="i_user"]').send_keys(yourID)
 driver.find_element(by = By.XPATH, value = '//*[@name="i_pass"]').send_keys(yourPW)
