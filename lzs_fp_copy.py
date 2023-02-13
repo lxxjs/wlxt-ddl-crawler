@@ -7,25 +7,36 @@ from pprint import pprint
 from time import strftime
 
 LOGIN_URL = 'https://id.tsinghua.edu.cn/do/off/ui/auth/login/post/bb5df85216504820be7bba2b0ae1535b/0?/login.do'
-LANDING_URL = 'https://learn.tsinghua.edu.cn/f/wlxt/index/course/student/'
 REDIRECT_URL = 'https://learn.tsinghua.edu.cn/f/loginAccountSave?_csrf=ab951a27-9f96-44ba-875f-d1f5cc39a164'
+LANDING_URL = 'https://learn.tsinghua.edu.cn/f/wlxt/index/course/student/'
 
 
 LOGIN_INFO = {
-    'i_user' : '**********',
-    'i_pass' : '**********'
+    'i_user' : '***********',
+    'i_pass' : '***********'
     }
-loginAccount = '**********'
+loginAccount = '***********'
 
 with requests.Session() as s:
     req = s.post(LOGIN_URL, data=LOGIN_INFO)
     time.sleep(1)
 
-    res = s.post(REDIRECT_URL, data=loginAccount)
+    print(req.text) #여기 TICKET 있음
     
+    res = s.post(REDIRECT_URL, data=loginAccount)
 
-    cookies = res.headers['set-cookie']
+    cookies_str = res.headers['set-cookie']
+    strings = cookies_str.split()
+    JSESSIONID = strings[6][11:-1]
+    serverid = strings[9][9:-1]
+    XSRF_TOKEN = strings[0][11:-1]
 
+    cookies = {
+        'JSESSIONID' : JSESSIONID,
+        'serverid' : serverid,
+        'XSRF-TOKEN' : XSRF_TOKEN,
+    }
+    print(cookies)
     headers = {
         'authority': 'learn.tsinghua.edu.cn',
         'upgrade-insecure-requests': '1',
@@ -41,4 +52,4 @@ with requests.Session() as s:
     }
 
     response = requests.get(LANDING_URL, cookies=cookies, headers=headers)
-    #print(response.text)
+    print(response.text)
