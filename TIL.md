@@ -7,4 +7,6 @@
 - 진작 헤더들에 관해 공부했다면 필요한 헤더들을 보내 정상적인 응답을 받았을 것이다
 - 또 cURL command 변환기라는 좋은 도구를 발견함 'https://curl.trillworks.com/' cURL command를 집어넣으면 적절한 요청을 보내는 코드로 변환해줌 
 
-
+# 20230214 TUE
+- CSRF
+- Request initiator chain
