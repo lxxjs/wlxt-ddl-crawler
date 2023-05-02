@@ -4,41 +4,85 @@ import time
 import codecs
 from pprint import pprint
 from time import strftime
+import urllib3
+from urllib3.util.ssl_ import create_urllib3_context
+
+ctx = create_urllib3_context()
+ctx.load_default_certs()
+ctx.options |= 0x4  # ssl.OP_LEGACY_SERVER_CONNECT
+
 
 LOGIN_URL = 'https://id.tsinghua.edu.cn/do/off/ui/auth/login/post/bb5df85216504820be7bba2b0ae1535b/0?/login.do'
+# LOGIN_URL = "https://learn.tsinghua.edu.cn/f/login"
 REDIRECT_URL = 'https://learn.tsinghua.edu.cn/f/loginAccountSave'
 LANDING_URL = 'https://learn.tsinghua.edu.cn/f/wlxt/index/course/student/'
-
+COURSE_LIST_URL = "https://learn.tsinghua.edu.cn/b/wlxt/common/auth/gnt?_csrf=07372d0a-5cc5-4b2c-bd2c-ed987a31bf69"
 
 TEST_URL = 'https://learn.tsinghua.edu.cn/b/j_spring_security_thauth_roaming_entry?ticket='
 
+with open("./account.key") as f:
+    lines = f.readlines()
+    username = lines[0].strip()
+    password = lines[1].strip()
+    f.close()
+
+
+# Simulate the submission of the login form
+session = requests.Session()
+
 LOGIN_INFO = {
-    'i_user' : '*********',
-    'i_pass' : '**********',
+    'i_user' : username,
+    'i_pass' : password,
     'atOnce' : True,
 }
-loginAccount = '*********'
 
-with requests.Session() as s:
-    login_page = s.post(LOGIN_URL, data=LOGIN_INFO)
-    time.sleep(1)
+# session.post(LOGIN_URL, data=LOGIN_INFO)
 
-    # find ticket value
-    soup = bs(login_page.text, 'html.parser')
+# # Use the session object to send subsequent requests to the website
+# response = session.get('https://learn.tsinghua.edu.cn/f/wlxt/index/course/student/')
+
+with urllib3.PoolManager(ssl_context=ctx) as http:
+    resp = http.request(
+    "POST",
+    LOGIN_URL,
+    fields=LOGIN_INFO
+    )
+
+    soup = bs(resp._body, 'html.parser')
     #print(soup)
     url_with_ticket = soup.find('a')['href'] # find 'href' attribute from html 'a' tag
     print(url_with_ticket)
     TICKET = url_with_ticket.split('=')[2]
     TEST_URL = TEST_URL + TICKET
-    print(TEST_URL)
-    redirect_page = s.get(TEST_URL)
-    soup = bs(redirect_page.text, 'html.parser')
+    redirect_page = http.request("GET", TEST_URL)
+    soup = bs(redirect_page._body, 'html.parser')
     ans = soup.find('div', {'id' : 'suoxuecourse'})
     print(ans)
-    landing_page = s.get(LANDING_URL)
-    soup = bs(landing_page.text, 'html.parser')
+    landing_page = http.request("GET", LANDING_URL)
+    soup = bs(landing_page._body, 'html.parser')
     ans = soup.find('div', {'id' : 'suoxuecourse'})
     print(ans)
+
+# with requests.Session() as s:
+#     login_page = s.post(LOGIN_URL, data=LOGIN_INFO)
+#     time.sleep(1)
+
+#     # find ticket value
+#     soup = bs(login_page.text, 'html.parser')
+#     print(soup)
+#     url_with_ticket = soup.find('a')['href'] # find 'href' attribute from html 'a' tag
+#     print(url_with_ticket)
+    # TICKET = url_with_ticket.split('=')[2]
+    # TEST_URL = TEST_URL + TICKET
+    # print(TEST_URL)
+    # redirect_page = s.get(TEST_URL)
+    # soup = bs(redirect_page.text, 'html.parser')
+    # ans = soup.find('div', {'id' : 'suoxuecourse'})
+    # print(ans)
+    # landing_page = s.get(LANDING_URL)
+    # soup = bs(landing_page.text, 'html.parser')
+    # ans = soup.find('div', {'id' : 'suoxuecourse'})
+    # print(ans)
     #여기까지만 써도 된다 .... 거의다왔따
 
 
