@@ -1,6 +1,12 @@
+legacy
 account.key
 output
 debug
-lzs_fp_copy.py
-lzf_fp.py
-DRIVER
+
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+venv/
+.env
