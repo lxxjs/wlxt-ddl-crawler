@@ -1,96 +1,107 @@
 /**
  * API client for 网络学堂.
- * Ported from src/config.py (URLs) and src/crawler.py (request logic).
+ * Course list: parsed from the student HTML page (like main.py).
+ * Homework:    POST /b/wlxt/kczy/zy/student/zyListWj with aoData format.
  */
 
-import { buildHeaders, BASE_URL } from './auth.js';
+import { getSessionCookies, BASE_URL } from './auth.js';
 import { normalizeHomework, sortHomework } from './models.js';
 
-// API endpoints (from src/config.py)
-const API_PREFIX = `${BASE_URL}/b`;
-const SEMESTER_LIST_URL = `${API_PREFIX}/wlxt/kc/v_wlkc_xs_xkb_kcb_extend/student/loadSemesterIdList`;
-const COURSE_LIST_URL = `${API_PREFIX}/wlxt/kc/v_wlkc_xs_xkb_kcb_extend/student/loadCourseBySemesterId`;
-const HOMEWORK_LIST_URL = `${API_PREFIX}/wlxt/kczy/zy/student/index/zyListWj`;
+const STUDENT_PAGE = `${BASE_URL}/f/wlxt/index/course/student/`;
+const HOMEWORK_API = `${BASE_URL}/b/wlxt/kczy/zy/student/zyListWj`;
 
 /**
- * Calculate current semester ID based on date (from src/crawler.py:42-58).
+ * Get XSRF-TOKEN cookie value.
  */
-function calculateCurrentSemester() {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = now.getMonth() + 1;
-
-  if (month >= 2 && month <= 6) return `${year - 1}-${year}-2`;
-  if (month >= 7 && month <= 8) return `${year - 1}-${year}-3`;
-  if (month >= 9) return `${year}-${year + 1}-1`;
-  return `${year - 1}-${year}-1`; // January
+async function getCsrfToken() {
+  const cookies = await getSessionCookies();
+  return cookies['XSRF-TOKEN'] || '';
 }
 
 /**
- * Make an authenticated GET request.
+ * POST to a DataTable-style API endpoint.
+ * Sends aoData as a JSON array (matches the wlxt DataTable plugin format).
+ * CSRF token must be both in the URL query param AND X-CSRF-Token header.
  */
-async function apiGet(url) {
-  const headers = await buildHeaders();
-  const resp = await fetch(url, { headers, credentials: 'include' });
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+async function dtPost(url, extraParams = []) {
+  const csrf = await getCsrfToken();
+
+  const aoData = [
+    { name: 'sEcho',          value: '1' },
+    { name: 'iColumns',       value: '5' },
+    { name: 'sColumns',       value: '' },
+    { name: 'iDisplayStart',  value: '0' },
+    { name: 'iDisplayLength', value: '-1' },
+    { name: 'sSearch',        value: '' },
+    { name: 'bRegex',         value: 'false' },
+    { name: 'iSortCol_0',     value: '0' },
+    { name: 'sSortDir_0',     value: 'asc' },
+    { name: 'iSortingCols',   value: '1' },
+    ...extraParams,
+  ];
+
+  const resp = await fetch(`${url}?_csrf=${encodeURIComponent(csrf)}`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+      'X-Requested-With': 'XMLHttpRequest',
+      'X-CSRF-Token': csrf,
+      'X-XSRF-TOKEN': csrf,
+      'Referer': STUDENT_PAGE,
+    },
+    body: `aoData=${encodeURIComponent(JSON.stringify(aoData))}`,
+  });
+
+  if (!resp.ok) throw new Error(`HTTP ${resp.status} from ${url}`);
   return resp.json();
 }
 
 /**
- * Make an authenticated POST request with form data.
+ * Get courses by parsing the student HTML landing page.
+ * Mirrors the approach in main.py: looks for #suoxuecourse .item elements.
  */
-async function apiPost(url, params) {
-  const headers = await buildHeaders();
-  headers['Content-Type'] = 'application/x-www-form-urlencoded; charset=UTF-8';
+async function getCourses() {
+  const csrf = await getCsrfToken();
+  const resp = await fetch(STUDENT_PAGE, {
+    credentials: 'include',
+    headers: {
+      'X-CSRF-Token': csrf,
+      'X-XSRF-TOKEN': csrf,
+    },
+  });
+  if (!resp.ok) throw new Error(`Failed to fetch student page: HTTP ${resp.status}`);
+  const html = await resp.text();
 
-  const body = new URLSearchParams(params).toString();
-  const resp = await fetch(url, { method: 'POST', headers, body, credentials: 'include' });
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-  return resp.json();
-}
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, 'text/html');
 
-/**
- * Get current semester ID (from src/crawler.py:26-40).
- */
-async function getCurrentSemester() {
-  try {
-    const data = await apiGet(SEMESTER_LIST_URL);
-    if (data.result === 'success' && data.resultList?.length) {
-      return data.resultList[0].id;
+  const courses = [];
+  const items = doc.querySelectorAll('#suoxuecourse .item');
+  for (const item of items) {
+    // Get wlkcid from hidden input
+    const wlkcidInput = item.querySelector('input.wlkcid');
+    const titleEl = item.querySelector('a.title');
+    const teacherEl = item.querySelector('span.teacherName');
+
+    const wlkcid = wlkcidInput?.value || '';
+    const name = titleEl?.textContent?.trim() || 'Unknown Course';
+    const teacher = teacherEl?.textContent?.trim() || '';
+
+    if (wlkcid) {
+      courses.push({ id: wlkcid, name, teacher });
     }
-  } catch (e) {
-    console.warn('Failed to get semester list, using calculated value:', e);
   }
-  return calculateCurrentSemester();
+  return courses;
 }
 
 /**
- * Get courses for a semester (from src/crawler.py:60-109).
- */
-async function getCourses(semesterId) {
-  if (!semesterId) semesterId = await getCurrentSemester();
-  const data = await apiPost(COURSE_LIST_URL, { semester: semesterId });
-
-  if (data.result === 'success' && data.resultList) {
-    return data.resultList.map(item => ({
-      id: item.wlkcid || '',
-      name: item.kcm || 'Unknown Course',
-      teacher: item.jsm || '',
-      courseNumber: item.kch || '',
-    }));
-  }
-  return [];
-}
-
-/**
- * Get unsubmitted homework for a single course (from src/crawler.py:130-188).
+ * Get unsubmitted homework for a single course.
  */
 async function getCourseHomework(course) {
-  const data = await apiPost(HOMEWORK_LIST_URL, {
-    wlkcid: course.id,
-    size: 100,
-    page: 1,
-  });
+  const data = await dtPost(HOMEWORK_API, [
+    { name: 'wlkcid', value: course.id },
+  ]);
 
   const rows = data?.object?.aaData || [];
   return rows.map(item => normalizeHomework(item, course.name, course.id));
@@ -99,14 +110,13 @@ async function getCourseHomework(course) {
 /**
  * Fetch all homework across all courses with concurrency limit.
  */
-async function getAllHomework(semesterId) {
-  const courses = await getCourses(semesterId);
+async function getAllHomework() {
+  const courses = await getCourses();
   if (!courses.length) return [];
 
   const allHomework = [];
   const CONCURRENCY = 3;
 
-  // Process in batches of CONCURRENCY
   for (let i = 0; i < courses.length; i += CONCURRENCY) {
     const batch = courses.slice(i, i + CONCURRENCY);
     const results = await Promise.allSettled(batch.map(c => getCourseHomework(c)));
@@ -122,9 +132,4 @@ async function getAllHomework(semesterId) {
   return sortHomework(allHomework);
 }
 
-export {
-  getCurrentSemester,
-  getCourses,
-  getCourseHomework,
-  getAllHomework,
-};
+export { getCourses, getCourseHomework, getAllHomework };
