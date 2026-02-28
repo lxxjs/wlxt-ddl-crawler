@@ -1,0 +1,357 @@
+/* Dark theme ported from src/output.py:48-228 */
+:root {
+  --bg-primary: #0f0f1a;
+  --bg-secondary: #1a1a2e;
+  --bg-card: #252542;
+  --text-primary: #e0e0ff;
+  --text-secondary: #a0a0c0;
+  --accent-urgent: #ff4757;
+  --accent-warning: #ffa502;
+  --accent-normal: #2ed573;
+  --accent-info: #70a1ff;
+  --gradient-1: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  --shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  width: 420px;
+  min-height: 200px;
+  max-height: 600px;
+  overflow-y: auto;
+}
+
+.container {
+  padding: 16px;
+}
+
+/* Header */
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+h1 {
+  font-size: 1.2rem;
+  background: var(--gradient-1);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.header-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.icon-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 1.2rem;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+  transition: background 0.15s;
+}
+
+.icon-btn:hover {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+.icon-btn.spinning {
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Stats */
+.stats {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.stat-card {
+  flex: 1;
+  background: var(--bg-secondary);
+  padding: 8px;
+  border-radius: 10px;
+  text-align: center;
+}
+
+.stat-number {
+  font-size: 1.4rem;
+  font-weight: 700;
+  display: block;
+}
+
+.stat-label {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+}
+
+.stat-urgent .stat-number { color: var(--accent-urgent); }
+.stat-active .stat-number { color: var(--accent-normal); }
+.stat-expired .stat-number { color: var(--text-secondary); }
+
+/* Status bar */
+.status-bar {
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  margin-bottom: 12px;
+  text-align: center;
+}
+
+.status-bar.error {
+  background: rgba(255, 71, 87, 0.15);
+  color: var(--accent-urgent);
+}
+
+/* Login prompt */
+.login-prompt {
+  text-align: center;
+  padding: 24px 16px;
+}
+
+.login-prompt p {
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+}
+
+.login-prompt button {
+  background: var(--gradient-1);
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.login-prompt button:hover {
+  opacity: 0.85;
+}
+
+/* Homework list */
+.homework-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.homework-card {
+  background: var(--bg-card);
+  border-radius: 12px;
+  padding: 12px 14px;
+  border-left: 4px solid var(--accent-info);
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.homework-card:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow);
+}
+
+.homework-card.urgent {
+  border-left-color: var(--accent-urgent);
+  animation: pulse 2s infinite;
+}
+
+.homework-card.warning {
+  border-left-color: var(--accent-warning);
+}
+
+.homework-card.normal {
+  border-left-color: var(--accent-normal);
+}
+
+.homework-card.expired {
+  border-left-color: var(--text-secondary);
+  opacity: 0.5;
+}
+
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 71, 87, 0.3); }
+  50% { box-shadow: 0 0 12px 3px rgba(255, 71, 87, 0.15); }
+}
+
+.homework-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.homework-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  flex: 1;
+  word-break: break-word;
+}
+
+.homework-deadline {
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  border-radius: 12px;
+  background: var(--bg-secondary);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.homework-deadline.urgent {
+  background: var(--accent-urgent);
+  color: white;
+}
+
+.homework-deadline.warning {
+  background: var(--accent-warning);
+  color: var(--bg-primary);
+}
+
+.homework-course {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+}
+
+.time-left {
+  font-weight: 500;
+  margin-left: 4px;
+}
+
+/* Empty state */
+.empty-state {
+  text-align: center;
+  padding: 32px 16px;
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+}
+
+/* Footer */
+.footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--bg-card);
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.export-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.small-btn {
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  border: none;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.small-btn:hover {
+  background: var(--bg-card);
+  color: var(--text-primary);
+}
+
+/* Settings panel */
+.settings-panel {
+  margin-top: 12px;
+  padding: 16px;
+  background: var(--bg-secondary);
+  border-radius: 12px;
+}
+
+.settings-panel h3 {
+  font-size: 1rem;
+  margin-bottom: 12px;
+}
+
+.settings-panel label {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+}
+
+.settings-panel input[type="text"],
+.settings-panel input[type="password"],
+.settings-panel input[type="number"] {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 8px 10px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--bg-card);
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+
+.settings-panel input:focus {
+  outline: none;
+  border-color: var(--accent-info);
+}
+
+.checkbox-label {
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+  flex-direction: row;
+}
+
+.checkbox-label input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+}
+
+.settings-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.primary-btn {
+  background: var(--gradient-1);
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.primary-btn:hover {
+  opacity: 0.85;
+}
+
+/* Utility */
+.hidden {
+  display: none !important;
+}

@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <header>
+      <h1>📚 网络学堂作业</h1>
+      <div class="header-actions">
+        <button id="btn-refresh" class="icon-btn" title="刷新">⟳</button>
+        <button id="btn-settings" class="icon-btn" title="设置">⚙</button>
+      </div>
+    </header>
+
+    <!-- Stats bar -->
+    <div class="stats" id="stats">
+      <div class="stat-card stat-urgent">
+        <span class="stat-number" id="stat-urgent">-</span>
+        <span class="stat-label">紧急</span>
+      </div>
+      <div class="stat-card stat-active">
+        <span class="stat-number" id="stat-active">-</span>
+        <span class="stat-label">待完成</span>
+      </div>
+      <div class="stat-card stat-expired">
+        <span class="stat-number" id="stat-expired">-</span>
+        <span class="stat-label">已过期</span>
+      </div>
+    </div>
+
+    <!-- Status message -->
+    <div id="status-bar" class="status-bar hidden"></div>
+
+    <!-- Login prompt (hidden by default) -->
+    <div id="login-prompt" class="login-prompt hidden">
+      <p>会话已过期，请重新登录</p>
+      <button id="btn-login">打开登录页面</button>
+    </div>
+
+    <!-- Homework list -->
+    <div id="homework-list" class="homework-list"></div>
+
+    <!-- Empty state -->
+    <div id="empty-state" class="empty-state hidden">
+      🎉 没有待完成的作业！
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+      <span id="updated-at"></span>
+      <div class="export-actions">
+        <button id="btn-copy" class="small-btn" title="复制文字列表">📋 复制</button>
+        <button id="btn-ics" class="small-btn" title="导出到Apple提醒事项">📅 导出.ics</button>
+      </div>
+    </div>
+
+    <!-- Settings panel (hidden by default) -->
+    <div id="settings-panel" class="settings-panel hidden">
+      <h3>设置</h3>
+      <label>
+        用户名
+        <input type="text" id="input-username" placeholder="清华用户名">
+      </label>
+      <label>
+        密码
+        <input type="password" id="input-password" placeholder="密码">
+      </label>
+      <label>
+        刷新间隔 (分钟)
+        <input type="number" id="input-interval" min="5" max="120" value="30">
+      </label>
+      <label class="checkbox-label">
+        <input type="checkbox" id="input-notifications" checked>
+        启用通知
+      </label>
+      <div class="settings-actions">
+        <button id="btn-save-settings" class="primary-btn">保存</button>
+        <button id="btn-cancel-settings" class="small-btn">取消</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="popup.js" type="module"></script>
+</body>
+</html>
