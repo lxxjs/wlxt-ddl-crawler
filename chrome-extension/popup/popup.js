@@ -144,16 +144,13 @@ function setupListeners() {
     btn.classList.remove('spinning');
 
     if (result.success) {
-      currentHomework = result.homework.map(hw => ({
-        ...hw,
-        // timeLeft and urgency already computed by normalizeHomework
-      }));
+      currentHomework = result.homework;
       renderHomework(currentHomework);
-      updatedAtEl.textContent = `更新: ${new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`;
+      updatedAtEl.textContent = `v1.1.0 · 更新: ${new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`;
       hideStatus();
     } else if (result.error === 'session_expired') {
       loginPrompt.classList.remove('hidden');
-      showStatus('会话已过期', true);
+      showStatus('会话已过期 — 请先在浏览器中登录网络学堂', true);
     } else {
       showStatus(`刷新失败: ${result.error}`, true);
     }

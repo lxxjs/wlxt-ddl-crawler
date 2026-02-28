@@ -117,7 +117,11 @@ h1 {
   border-radius: 8px;
   font-size: 0.85rem;
   margin-bottom: 12px;
-  text-align: center;
+  text-align: left;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 300px;
+  overflow-y: auto;
 }
 
 .status-bar.error {

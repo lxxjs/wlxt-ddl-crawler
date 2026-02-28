@@ -4,19 +4,10 @@
  * Homework:    POST /b/wlxt/kczy/zy/student/zyListWj with aoData format.
  */
 
-import { getSessionCookies, BASE_URL } from './auth.js';
+import { getCsrfToken, BASE_URL, STUDENT_PAGE, consumeCachedStudentHtml } from './auth.js';
 import { normalizeHomework, sortHomework } from './models.js';
 
-const STUDENT_PAGE = `${BASE_URL}/f/wlxt/index/course/student/`;
 const HOMEWORK_API = `${BASE_URL}/b/wlxt/kczy/zy/student/zyListWj`;
-
-/**
- * Get XSRF-TOKEN cookie value.
- */
-async function getCsrfToken() {
-  const cookies = await getSessionCookies();
-  return cookies['XSRF-TOKEN'] || '';
-}
 
 /**
  * POST to a DataTable-style API endpoint.
@@ -59,34 +50,36 @@ async function dtPost(url, extraParams = []) {
 
 /**
  * Get courses by parsing the student HTML landing page.
- * Mirrors the approach in main.py: looks for #suoxuecourse .item elements.
+ * Mirrors the approach in main.py: looks for course item elements.
  */
 async function getCourses() {
-  const csrf = await getCsrfToken();
-  const resp = await fetch(STUDENT_PAGE, {
-    credentials: 'include',
-    headers: {
-      'X-CSRF-Token': csrf,
-      'X-XSRF-TOKEN': csrf,
-    },
-  });
-  if (!resp.ok) throw new Error(`Failed to fetch student page: HTTP ${resp.status}`);
-  const html = await resp.text();
+  // Reuse HTML cached by isSessionValid() to avoid a duplicate fetch
+  let html = consumeCachedStudentHtml();
+  if (!html) {
+    const csrf = await getCsrfToken();
+    const resp = await fetch(STUDENT_PAGE, {
+      credentials: 'include',
+      headers: { 'X-CSRF-Token': csrf, 'X-XSRF-TOKEN': csrf },
+    });
+    if (!resp.ok) throw new Error(`Failed to fetch student page: HTTP ${resp.status}`);
+    html = await resp.text();
+  }
 
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(html, 'text/html');
-
+  // Service workers have no DOMParser, so parse with regex
   const courses = [];
-  const items = doc.querySelectorAll('#suoxuecourse .item');
-  for (const item of items) {
-    // Get wlkcid from hidden input
-    const wlkcidInput = item.querySelector('input.wlkcid');
-    const titleEl = item.querySelector('a.title');
-    const teacherEl = item.querySelector('span.teacherName');
+  const titleRegex = /<a[^>]*class="[^"]*title[^"]*"[^>]*>([\s\S]*?)<\/a>/;
+  const teacherRegex = /<span[^>]*class="[^"]*teacherName[^"]*"[^>]*>([\s\S]*?)<\/span>/;
+  const allWlkcids = [...html.matchAll(/<input[^>]*class="[^"]*wlkcid[^"]*"[^>]*value="([^"]+)"[^>]*>/g)];
 
-    const wlkcid = wlkcidInput?.value || '';
-    const name = titleEl?.textContent?.trim() || 'Unknown Course';
-    const teacher = teacherEl?.textContent?.trim() || '';
+  for (const match of allWlkcids) {
+    const wlkcid = match[1];
+    // Search forward from this match position for the title and teacher
+    const after = html.substring(match.index, match.index + 2000);
+    const titleMatch = after.match(titleRegex);
+    const teacherMatch = after.match(teacherRegex);
+
+    const name = titleMatch ? titleMatch[1].replace(/<[^>]*>/g, '').trim() : 'Unknown Course';
+    const teacher = teacherMatch ? teacherMatch[1].replace(/<[^>]*>/g, '').trim() : '';
 
     if (wlkcid) {
       courses.push({ id: wlkcid, name, teacher });

@@ -15,7 +15,6 @@ const ALARM_NAME = 'refreshHomework';
 chrome.runtime.onInstalled.addListener(async () => {
   const settings = await getSettings();
   chrome.alarms.create(ALARM_NAME, { periodInMinutes: settings.refreshInterval });
-  // Initial fetch
   await refreshHomework();
 });
 
@@ -36,11 +35,13 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 async function refreshHomework() {
   try {
     const valid = await isSessionValid();
+
     if (!valid) {
       updateBadge('!', '#ff4757');
       return { success: false, error: 'session_expired' };
     }
 
+    // Session is valid and CSRF token is now cached by isSessionValid()
     const homework = await getAllHomework();
     await saveHomeworkCache(homework);
     updateBadgeFromHomework(homework);
@@ -62,18 +63,16 @@ function updateBadge(text, color) {
 }
 
 function updateBadgeFromHomework(homework) {
-  // Recalculate urgency (time may have passed since cache)
   const urgentCount = homework.filter(hw => {
     if (!hw.deadline) return false;
-    const level = urgencyLevel(new Date(hw.deadline));
-    return level === 1; // due within 24h
+    return urgencyLevel(new Date(hw.deadline)) === 1;
   }).length;
 
   if (urgentCount > 0) {
     updateBadge(String(urgentCount), '#ff4757');
   } else {
     const activeCount = homework.filter(hw => {
-      if (!hw.deadline) return true; // no deadline = still active
+      if (!hw.deadline) return true;
       return urgencyLevel(new Date(hw.deadline)) > 0;
     }).length;
     if (activeCount > 0) {
@@ -110,10 +109,8 @@ async function checkUrgentNotifications(homework) {
 chrome.webNavigation.onCompleted.addListener(async (details) => {
   if (details.url.includes(LOGIN_SUCCESS_PATH) && details.frameId === 0) {
     console.log('Login detected, refreshing homework...');
-    // Small delay to let cookies settle
     setTimeout(async () => {
       const result = await refreshHomework();
-      // Notify popup if open
       chrome.runtime.sendMessage({ type: 'LOGIN_SUCCESS', ...result }).catch(() => {});
     }, 2000);
   }
@@ -124,13 +121,12 @@ chrome.webNavigation.onCompleted.addListener(async (details) => {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'REFRESH') {
     refreshHomework().then(sendResponse);
-    return true; // async response
+    return true;
   }
 
   if (message.type === 'GET_HOMEWORK') {
     getHomeworkCache().then(cache => {
       if (cache?.homework) {
-        // Recalculate timeLeft and urgency with fresh timestamps
         const refreshed = cache.homework.map(hw => ({
           ...hw,
           timeLeft: hw.deadline ? formatTimeLeft(new Date(hw.deadline)) : '',

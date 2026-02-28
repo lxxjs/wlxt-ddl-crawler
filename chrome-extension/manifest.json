@@ -2,17 +2,18 @@
   "manifest_version": 3,
   "name": "网络学堂作业提醒",
   "description": "Tsinghua Web Learning homework deadline reminder",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "permissions": [
     "cookies",
     "storage",
     "alarms",
     "webNavigation",
-    "notifications"
+    "notifications",
+    "scripting",
+    "tabs"
   ],
   "host_permissions": [
-    "https://learn.tsinghua.edu.cn/*",
-    "https://id.tsinghua.edu.cn/*"
+    "https://*.tsinghua.edu.cn/*"
   ],
   "background": {
     "service_worker": "background/service-worker.js",
@@ -30,6 +31,11 @@
     {
       "matches": ["https://id.tsinghua.edu.cn/*"],
       "js": ["content/autofill.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://learn.tsinghua.edu.cn/*"],
+      "js": ["content/cookie-bridge.js"],
       "run_at": "document_idle"
     }
   ],
