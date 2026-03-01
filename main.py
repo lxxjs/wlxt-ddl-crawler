@@ -23,7 +23,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from bs4 import BeautifulSoup
 
-from src.models import Course, Homework
+from src.models import Homework
 from src.output import generate_html, generate_json
 from src.config import LOGIN_URL, BASE_URL
 
@@ -217,10 +217,7 @@ class WebLearningCrawler:
     def _scrape_homework_page(self, course_name: str) -> list:
         """Scrape homework from the current homework page."""
         homework_list = []
-        
-        # Wait for page to load
-        time.sleep(1)
-        
+
         soup = BeautifulSoup(self.driver.page_source, 'html.parser')
         
         # The homework page typically has tabs: "未提交" (unsubmitted), "已完成" (completed)

@@ -1,22 +1,9 @@
 """
 Data models for courses and homework.
 """
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
-
-
-@dataclass
-class Course:
-    """Represents a course in 网络学堂."""
-    id: str
-    name: str
-    teacher: str = ""
-    semester: str = ""
-    course_number: str = ""
-
-    def __str__(self) -> str:
-        return f"{self.name} ({self.teacher})"
 
 
 @dataclass

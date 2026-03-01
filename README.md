@@ -1,82 +1,59 @@
 # 网络学堂 Homework Crawler
 
-A Python crawler that fetches all homework deadlines from Tsinghua University's Web Learning platform (`learn.tsinghua.edu.cn`).
+Fetches all homework deadlines from Tsinghua University's Web Learning platform (`learn.tsinghua.edu.cn`) and generates an HTML report sorted by urgency.
 
-## ✨ Features
-
-- **Browser-based login** - Supports 2FA authentication
-- **Auto-fetch homework** - Gets all assignments from enrolled courses
-- **Beautiful HTML report** - Dark theme with urgency indicators
-- **Deadline tracking** - Sorted by due date with time remaining
-
-## 🚀 Quick Start
-
-### 1. Set up virtual environment
+## Setup
 
 ```bash
 python3 -m venv venv
 source venv/bin/activate
-```
-
-### 2. Install dependencies
-
-```bash
 pip install -r requirements.txt
 ```
 
-### 3. Run the crawler
+Requires Chrome (ChromeDriver is managed automatically by Selenium).
+
+## Usage
 
 ```bash
-python main.py
+python main.py              # Generate output/homework.html
+python main.py --json       # Also generate output/homework.json
+python main.py --debug      # Save page HTML snapshots to debug/
+python main.py --no-close   # Keep browser open after completion
 ```
 
-A Chrome browser will open. Log in to 网络学堂 (complete 2FA if required). Once logged in, the crawler will automatically:
-1. Extract your session
-2. Fetch all courses
-3. Fetch homework from each course
-4. Generate `output/homework.html`
+A Chrome window opens — log in to 网络学堂 (complete 2FA if required). The crawler then scrapes all courses and homework automatically.
 
-### 3. View your homework
+## Output
 
-Open `output/homework.html` in your browser!
+`output/homework.html` — a self-contained dark-theme report with:
+- Stats bar (urgent / active / expired counts)
+- Cards color-coded by urgency: red (<24h), orange (<3d), green (≤7d)
+- Expired homework section at the bottom
 
-## 📸 Output
-
-The generated HTML report includes:
-- 📊 Statistics dashboard (urgent, active, expired counts)
-- 🔴 Urgent homework (due within 24h) with pulsing animation
-- 🟠 Warning homework (due within 3 days)
-- 🟢 Normal homework
-- ⚫ Expired homework
-
-## 🔧 Options
-
-```bash
-# Specify semester
-python main.py --semester 2024-2025-1
-
-# Also generate JSON output
-python main.py --json
-```
-
-## 📁 Project Structure
+## Project Structure
 
 ```
 wlxt-ddl-crawler/
-├── main.py              # Entry point
-├── requirements.txt     # Dependencies
+├── main.py                        # Selenium crawler (entry point)
+├── requirements.txt
 ├── src/
-│   ├── auth.py         # Selenium-based authentication
-│   ├── config.py       # URLs and constants
-│   ├── crawler.py      # Course & homework fetching
-│   ├── models.py       # Data models
-│   └── output.py       # HTML/JSON generation
-└── output/
-    └── homework.html   # Generated report
+│   ├── config.py                  # URLs and output paths
+│   ├── models.py                  # Homework dataclass
+│   └── output.py                  # HTML/JSON generation
+└── chrome-extension/              # Chrome extension (badge + notifications)
+    ├── manifest.json
+    ├── background/service-worker.js
+    ├── lib/                       # auth, api, models, storage, export
+    ├── popup/                     # Extension popup UI
+    └── content/                   # Autofill + cookie-bridge scripts
 ```
 
-## ⚠️ Notes
+## Chrome Extension
 
-- Chrome browser is required (auto-managed by Selenium)
-- Login session is NOT stored - you log in fresh each time
-- Your credentials are never stored by this tool
+The `chrome-extension/` directory contains a Manifest V3 extension that:
+- Shows a badge with the count of urgent/active homework
+- Sends notifications for assignments due within 24h
+- Refreshes automatically on a configurable interval
+- Exports to clipboard (text) or `.ics` (Apple Reminders)
+
+Load it in Chrome via **Extensions → Load unpacked** and point to `chrome-extension/`.
