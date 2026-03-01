@@ -55,13 +55,12 @@ class Homework:
         """
         if not self.deadline:
             return 5  # No deadline - lowest priority
-        
-        if self.is_expired:
+
+        now = datetime.now()
+        if now > self.deadline:
             return 0
-        
-        time_diff = self.deadline - datetime.now()
-        hours_left = time_diff.total_seconds() / 3600
-        
+
+        hours_left = (self.deadline - now).total_seconds() / 3600
         if hours_left < 24:
             return 1
         elif hours_left < 72:

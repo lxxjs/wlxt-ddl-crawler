@@ -9,7 +9,6 @@ from .config import (
     SEMESTER_LIST_URL,
     COURSE_LIST_URL,
     HOMEWORK_LIST_URL,
-    HOMEWORK_SUBMITTED_URL,
     BASE_URL,
 )
 from .models import Course, Homework
@@ -109,23 +108,8 @@ class HomeworkCrawler:
             return []
     
     def get_homework(self, course: Course) -> List[Homework]:
-        """
-        Fetch homework assignments for a specific course.
-        
-        Args:
-            course: Course object
-        
-        Returns:
-            List of Homework objects
-        """
-        homework_list = []
-        
-        # Fetch unsubmitted homework
-        homework_list.extend(
-            self._fetch_homework_list(course, HOMEWORK_LIST_URL, "unsubmitted")
-        )
-        
-        return homework_list
+        """Fetch unsubmitted homework assignments for a course."""
+        return self._fetch_homework_list(course, HOMEWORK_LIST_URL, "unsubmitted")
     
     def _fetch_homework_list(
         self, 

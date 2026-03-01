@@ -134,8 +134,8 @@ function hideStatus() {
 
 function setupListeners() {
   // Refresh
-  $('#btn-refresh').addEventListener('click', async () => {
-    const btn = $('#btn-refresh');
+  $('#btn-refresh').addEventListener('click', async (event) => {
+    const btn = event.currentTarget;
     btn.classList.add('spinning');
     showStatus('正在刷新...');
 

@@ -13,9 +13,7 @@ from .models import Homework
 
 
 def ensure_output_dir():
-    """Create output directory if it doesn't exist."""
-    if not os.path.exists(OUTPUT_DIR):
-        os.makedirs(OUTPUT_DIR)
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 
 def generate_html(homework_list: List[Homework], output_path: str = None) -> str:
@@ -257,11 +255,11 @@ def generate_html(homework_list: List[Homework], output_path: str = None) -> str
                     {_generate_homework_cards(active) if active else '<div class="empty-state">🎉 没有待完成的作业!</div>'}
                 </div>
             </section>
-            
+
             {f'''<section>
                 <h2>⏰ 已过期作业</h2>
                 <div class="homework-list">
-                    {_generate_homework_cards(expired, expired=True)}
+                    {_generate_homework_cards(expired)}
                 </div>
             </section>''' if expired else ''}
         </main>
@@ -280,13 +278,13 @@ def generate_html(homework_list: List[Homework], output_path: str = None) -> str
     return output_path
 
 
-def _generate_homework_cards(homework_list: List[Homework], expired: bool = False) -> str:
+def _generate_homework_cards(homework_list: List[Homework]) -> str:
     """Generate HTML cards for homework items."""
     cards = []
-    
+
     for hw in homework_list:
         # Determine urgency class
-        if expired:
+        if hw.is_expired:
             urgency_class = "expired"
             deadline_class = ""
         elif hw.urgency_level == 1:

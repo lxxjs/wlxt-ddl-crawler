@@ -82,7 +82,6 @@ function normalizeHomework(item, courseName, courseId) {
 function sortHomework(homeworkList) {
   return [...homeworkList].sort((a, b) => {
     // Active (1-4) before expired (0), expired before no-deadline (5)
-    const order = [5, 4, 3, 2, 1, 0]; // priority mapping: lower index = lower sort priority
     const aRank = a.urgency === 0 ? 6 : a.urgency === 5 ? 7 : a.urgency;
     const bRank = b.urgency === 0 ? 6 : b.urgency === 5 ? 7 : b.urgency;
     if (aRank !== bRank) return aRank - bRank;

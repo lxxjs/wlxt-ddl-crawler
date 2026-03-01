@@ -261,13 +261,9 @@ class WebLearningCrawler:
                         title = cell.get_text(strip=True)
                     
                     # Deadline contains date format YYYY-MM-DD
+                    # Always take the last date found: start date comes first, deadline second
                     if re.match(r'\d{4}-\d{2}-\d{2}', cell_text):
-                        if not deadline_str:
-                            # First date might be start time, second is deadline
-                            deadline_str = cell_text
-                        else:
-                            # If we already have one, the second is more likely deadline
-                            deadline_str = cell_text
+                        deadline_str = cell_text
                     
                     # Time left / status
                     if '天' in cell_text or '小时' in cell_text or '已过期' in cell_text:

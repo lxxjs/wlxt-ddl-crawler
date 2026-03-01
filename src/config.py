@@ -11,8 +11,8 @@ BASE_URL = "https://learn.tsinghua.edu.cn"
 API_PREFIX = f"{BASE_URL}/b"
 SEMESTER_LIST_URL = f"{API_PREFIX}/wlxt/kc/v_wlkc_xs_xkb_kcb_extend/student/loadSemesterIdList"
 COURSE_LIST_URL = f"{API_PREFIX}/wlxt/kc/v_wlkc_xs_xkb_kcb_extend/student/loadCourseBySemesterId"
-HOMEWORK_LIST_URL = f"{API_PREFIX}/wlxt/kczy/zy/student/index/zyListWj"  # Unsubmitted homework
-HOMEWORK_SUBMITTED_URL = f"{API_PREFIX}/wlxt/kczy/zy/student/index/zyListYjwg"  # Submitted homework
+HOMEWORK_LIST_URL = f"{API_PREFIX}/wlxt/kczy/zy/student/zyListWj"  # Unsubmitted homework
+HOMEWORK_SUBMITTED_URL = f"{API_PREFIX}/wlxt/kczy/zy/student/zyListYjwg"  # Submitted homework
 
 # Browser settings
 BROWSER_WAIT_TIMEOUT = 300  # seconds to wait for user login

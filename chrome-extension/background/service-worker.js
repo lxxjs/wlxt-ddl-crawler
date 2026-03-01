@@ -12,17 +12,14 @@ const ALARM_NAME = 'refreshHomework';
 
 // --- Alarm setup ---
 
-chrome.runtime.onInstalled.addListener(async () => {
+async function setupAlarmAndRefresh() {
   const settings = await getSettings();
   chrome.alarms.create(ALARM_NAME, { periodInMinutes: settings.refreshInterval });
   await refreshHomework();
-});
+}
 
-chrome.runtime.onStartup.addListener(async () => {
-  const settings = await getSettings();
-  chrome.alarms.create(ALARM_NAME, { periodInMinutes: settings.refreshInterval });
-  await refreshHomework();
-});
+chrome.runtime.onInstalled.addListener(setupAlarmAndRefresh);
+chrome.runtime.onStartup.addListener(setupAlarmAndRefresh);
 
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === ALARM_NAME) {
@@ -63,18 +60,12 @@ function updateBadge(text, color) {
 }
 
 function updateBadgeFromHomework(homework) {
-  const urgentCount = homework.filter(hw => {
-    if (!hw.deadline) return false;
-    return urgencyLevel(new Date(hw.deadline)) === 1;
-  }).length;
+  const urgentCount = homework.filter(hw => hw.urgency === 1).length;
 
   if (urgentCount > 0) {
     updateBadge(String(urgentCount), '#ff4757');
   } else {
-    const activeCount = homework.filter(hw => {
-      if (!hw.deadline) return true;
-      return urgencyLevel(new Date(hw.deadline)) > 0;
-    }).length;
+    const activeCount = homework.filter(hw => hw.urgency > 0).length;
     if (activeCount > 0) {
       updateBadge(String(activeCount), '#2ed573');
     } else {
@@ -89,10 +80,7 @@ async function checkUrgentNotifications(homework) {
   const settings = await getSettings();
   if (!settings.notifications) return;
 
-  const urgent = homework.filter(hw => {
-    if (!hw.deadline) return false;
-    return urgencyLevel(new Date(hw.deadline)) === 1;
-  });
+  const urgent = homework.filter(hw => hw.urgency === 1);
 
   if (urgent.length > 0) {
     chrome.notifications.create('urgent-homework', {
