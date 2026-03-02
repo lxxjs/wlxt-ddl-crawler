@@ -76,8 +76,7 @@ function renderHomework(homework) {
   if (expired.length > 0) {
     const divider = document.createElement('div');
     divider.className = 'section-divider';
-    divider.style.cssText = 'color: var(--text-secondary); font-size: 0.8rem; margin: 8px 0 4px; padding-left: 4px;';
-    divider.textContent = `⏰ 已过期 (${expired.length})`;
+    divider.textContent = `已过期 (${expired.length})`;
     homeworkListEl.appendChild(divider);
 
     for (const hw of expired) {
