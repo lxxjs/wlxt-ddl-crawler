@@ -49,31 +49,33 @@ async function dtPost(url, extraParams = []) {
 }
 
 /**
- * Get courses by parsing the student HTML landing page.
- * Mirrors the approach in main.py: looks for course item elements.
+ * Parse course IDs, names, and teachers from the student page HTML.
+ * Exported for testing.
  */
-async function getCourses() {
-  // Reuse HTML cached by isSessionValid() to avoid a duplicate fetch
-  let html = consumeCachedStudentHtml();
-  if (!html) {
-    const csrf = await getCsrfToken();
-    const resp = await fetch(STUDENT_PAGE, {
-      credentials: 'include',
-      headers: { 'X-CSRF-Token': csrf, 'X-XSRF-TOKEN': csrf },
-    });
-    if (!resp.ok) throw new Error(`Failed to fetch student page: HTTP ${resp.status}`);
-    html = await resp.text();
-  }
-
-  // Service workers have no DOMParser, so parse with regex
+export function parseCoursesFromHtml(html) {
   const courses = [];
   const titleRegex = /<a[^>]*class="[^"]*title[^"]*"[^>]*>([\s\S]*?)<\/a>/;
   const teacherRegex = /<span[^>]*class="[^"]*teacherName[^"]*"[^>]*>([\s\S]*?)<\/span>/;
-  const allWlkcids = [...html.matchAll(/<input[^>]*class="[^"]*wlkcid[^"]*"[^>]*value="([^"]+)"[^>]*>/g)];
+
+  // Try multiple patterns for the wlkcid field — attribute order varies across
+  // wlxt versions: class before value, value before class, or name attribute.
+  const wlkcidPatterns = [
+    /<input[^>]*class="[^"]*wlkcid[^"]*"[^>]*value="([^"]+)"[^>]*>/g,   // class then value
+    /<input[^>]*value="([^"]+)"[^>]*class="[^"]*wlkcid[^"]*"[^>]*>/g,   // value then class
+    /<input[^>]*name="wlkcid"[^>]*value="([^"]+)"[^>]*>/g,               // name then value
+    /<input[^>]*value="([^"]+)"[^>]*name="wlkcid"[^>]*>/g,               // value then name
+  ];
+
+  let allWlkcids = [];
+  for (const pattern of wlkcidPatterns) {
+    allWlkcids = [...html.matchAll(pattern)];
+    if (allWlkcids.length) break;
+  }
+
+  console.log(`[api] parseCoursesFromHtml: matched ${allWlkcids.length} wlkcid inputs`);
 
   for (const match of allWlkcids) {
     const wlkcid = match[1];
-    // Search forward from this match position for the title and teacher
     const after = html.substring(match.index, match.index + 2000);
     const titleMatch = after.match(titleRegex);
     const teacherMatch = after.match(teacherRegex);
@@ -89,6 +91,34 @@ async function getCourses() {
 }
 
 /**
+ * Get courses by parsing the student HTML landing page.
+ */
+async function getCourses() {
+  // Reuse HTML cached by isSessionValid() to avoid a duplicate fetch
+  let html = consumeCachedStudentHtml();
+  if (!html) {
+    const csrf = await getCsrfToken();
+    const resp = await fetch(STUDENT_PAGE, {
+      credentials: 'include',
+      headers: { 'X-CSRF-Token': csrf, 'X-XSRF-TOKEN': csrf },
+    });
+    if (!resp.ok) throw new Error(`Failed to fetch student page: HTTP ${resp.status}`);
+    html = await resp.text();
+  }
+
+  return parseCoursesFromHtml(html);
+}
+
+/**
+ * Parse homework rows from an API response.
+ * Handles both { object: { aaData: [...] } } and { aaData: [...] } shapes.
+ * Exported for testing.
+ */
+export function parseHomeworkResponse(data) {
+  return data?.object?.aaData ?? data?.aaData ?? [];
+}
+
+/**
  * Get unsubmitted homework for a single course.
  */
 async function getCourseHomework(course) {
@@ -96,7 +126,8 @@ async function getCourseHomework(course) {
     { name: 'wlkcid', value: course.id },
   ]);
 
-  const rows = data?.object?.aaData || [];
+  const rows = parseHomeworkResponse(data);
+  console.log(`[api] getCourseHomework(${course.name}): ${rows.length} rows`);
   return rows.map(item => normalizeHomework(item, course.name, course.id));
 }
 
@@ -105,7 +136,12 @@ async function getCourseHomework(course) {
  */
 async function getAllHomework() {
   const courses = await getCourses();
-  if (!courses.length) return [];
+  if (!courses.length) {
+    console.warn('[api] getAllHomework: no courses found — course parsing may have failed');
+    return [];
+  }
+
+  console.log(`[api] getAllHomework: fetching homework for ${courses.length} course(s)`);
 
   const allHomework = [];
   const CONCURRENCY = 3;
@@ -117,7 +153,7 @@ async function getAllHomework() {
       if (result.status === 'fulfilled') {
         allHomework.push(...result.value);
       } else {
-        console.warn('Failed to fetch homework for a course:', result.reason);
+        console.warn('[api] Failed to fetch homework for a course:', result.reason);
       }
     }
   }

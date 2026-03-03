@@ -29,8 +29,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 async function loadHomework() {
   const response = await chrome.runtime.sendMessage({ type: 'GET_HOMEWORK' });
 
-  if (!response || !response.homework) {
-    showStatus('点击刷新获取作业列表');
+  if (!response || response.homework === null) {
+    // No cache yet — auto-refresh so the user doesn't have to click manually
+    await doRefresh();
     return;
   }
 
@@ -41,6 +42,34 @@ async function loadHomework() {
     const date = new Date(response.updatedAt);
     updatedAtEl.textContent = `更新: ${date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`;
   }
+}
+
+/**
+ * Trigger a homework refresh. Used both on initial load (no cache) and when
+ * the user clicks the refresh button.
+ */
+async function doRefresh() {
+  const btn = $('#btn-refresh');
+  btn.classList.add('spinning');
+  showStatus('正在获取作业...');
+
+  const result = await chrome.runtime.sendMessage({ type: 'REFRESH' });
+
+  btn.classList.remove('spinning');
+
+  if (result.success) {
+    currentHomework = result.homework;
+    renderHomework(currentHomework);
+    updatedAtEl.textContent = `v1.1.0 · 更新: ${new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`;
+    hideStatus();
+  } else if (result.error === 'session_expired') {
+    loginPrompt.classList.remove('hidden');
+    showStatus('会话已过期 — 请在浏览器中登录网络学堂，然后点击刷新', true);
+  } else {
+    showStatus(`获取失败: ${result.error}`, true);
+  }
+
+  return result;
 }
 
 // --- Render ---
@@ -133,27 +162,7 @@ function hideStatus() {
 
 function setupListeners() {
   // Refresh
-  $('#btn-refresh').addEventListener('click', async (event) => {
-    const btn = event.currentTarget;
-    btn.classList.add('spinning');
-    showStatus('正在刷新...');
-
-    const result = await chrome.runtime.sendMessage({ type: 'REFRESH' });
-
-    btn.classList.remove('spinning');
-
-    if (result.success) {
-      currentHomework = result.homework;
-      renderHomework(currentHomework);
-      updatedAtEl.textContent = `v1.1.0 · 更新: ${new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`;
-      hideStatus();
-    } else if (result.error === 'session_expired') {
-      loginPrompt.classList.remove('hidden');
-      showStatus('会话已过期 — 请先在浏览器中登录网络学堂', true);
-    } else {
-      showStatus(`刷新失败: ${result.error}`, true);
-    }
-  });
+  $('#btn-refresh').addEventListener('click', () => doRefresh());
 
   // Login
   $('#btn-login').addEventListener('click', () => {
