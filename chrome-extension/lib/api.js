@@ -125,4 +125,4 @@ async function getAllHomework() {
   return sortHomework(allHomework);
 }
 
-export { getCourses, getCourseHomework, getAllHomework };
+export { getAllHomework };

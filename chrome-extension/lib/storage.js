@@ -50,9 +50,6 @@ async function saveSettings(settings) {
 }
 
 export {
-  KEYS,
-  get,
-  set,
   getCredentials,
   saveCredentials,
   getHomeworkCache,

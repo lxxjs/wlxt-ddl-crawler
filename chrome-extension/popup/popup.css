@@ -1,5 +1,5 @@
 /* Tsinghua × Apple design system
- * Primary: #1493f2 (Tsinghua blue ≈ Apple system blue)
+ * Primary: #660874 (Tsinghua purple)
  * Warning: #ff9500 (Apple orange ≈ Tsinghua orange #ff9600)
  * Urgent:  #ff3b30 (Apple red)
  * Active:  #34c759 (Apple green)
@@ -14,7 +14,10 @@
   --text-tertiary:  #aeaeb2;
   --separator:      rgba(60, 60, 67, 0.12);
 
-  --accent:  #1493f2;
+  --accent:       #660874;
+  --accent-light: rgba(102, 8, 116, 0.1);
+  --accent-mid:   rgba(102, 8, 116, 0.18);
+  --accent-focus: rgba(102, 8, 116, 0.12);
   --urgent:  #ff3b30;
   --warning: #ff9500;
   --active:  #34c759;
@@ -24,6 +27,20 @@
   --shadow:    0 2px 10px rgba(0,0,0,0.09);
   --radius:    12px;
   --radius-sm: 8px;
+
+  --font-2xs: 0.62rem;
+  --font-xs:  0.68rem;
+  --font-sm:  0.75rem;
+  --font-md:  0.875rem;
+  --font-lg:  1rem;
+  --font-xl:  1.1rem;
+  --font-2xl: 1.5rem;
+
+  --space-xs:  4px;
+  --space-sm:  8px;
+  --space-md:  12px;
+  --space-lg:  16px;
+  --space-xl:  24px;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -57,7 +74,7 @@ header {
 }
 
 h1 {
-  font-size: 1rem;
+  font-size: var(--font-lg);
   font-weight: 600;
   color: var(--text-primary);
   letter-spacing: -0.01em;
@@ -69,7 +86,7 @@ h1 {
   background: none;
   border: none;
   color: var(--accent);
-  font-size: 1.1rem;
+  font-size: var(--font-xl);
   cursor: pointer;
   padding: 5px 8px;
   border-radius: var(--radius-sm);
@@ -77,7 +94,7 @@ h1 {
   line-height: 1;
 }
 
-.icon-btn:hover { background: rgba(20, 147, 242, 0.1); }
+.icon-btn:hover { background: var(--accent-light); }
 
 .icon-btn.spinning {
   animation: spin 0.8s linear infinite;
@@ -103,7 +120,7 @@ h1 {
 }
 
 .stat-number {
-  font-size: 1.5rem;
+  font-size: var(--font-2xl);
   font-weight: 700;
   display: block;
   letter-spacing: -0.03em;
@@ -111,7 +128,7 @@ h1 {
 }
 
 .stat-label {
-  font-size: 0.62rem;
+  font-size: var(--font-2xs);
   color: var(--text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -125,11 +142,11 @@ h1 {
 /* ─── Status bar ─── */
 .status-bar {
   margin: 8px 16px 0;
-  background: rgba(20, 147, 242, 0.08);
+  background: var(--accent-light);
   color: var(--accent);
   padding: 8px 12px;
   border-radius: var(--radius-sm);
-  font-size: 0.82rem;
+  font-size: var(--font-md);
   white-space: pre-wrap;
   word-break: break-all;
   max-height: 200px;
@@ -153,7 +170,7 @@ h1 {
 
 .login-prompt p {
   color: var(--text-secondary);
-  font-size: 0.875rem;
+  font-size: var(--font-md);
   margin-bottom: 12px;
 }
 
@@ -163,7 +180,7 @@ h1 {
   border: none;
   padding: 9px 22px;
   border-radius: 20px;
-  font-size: 0.875rem;
+  font-size: var(--font-md);
   font-weight: 500;
   cursor: pointer;
   transition: opacity 0.15s;
@@ -207,7 +224,7 @@ h1 {
 }
 
 .homework-title {
-  font-size: 0.875rem;
+  font-size: var(--font-md);
   font-weight: 600;
   flex: 1;
   word-break: break-word;
@@ -215,7 +232,7 @@ h1 {
 }
 
 .homework-deadline {
-  font-size: 0.68rem;
+  font-size: var(--font-xs);
   padding: 2px 8px;
   border-radius: 10px;
   background: var(--bg);
@@ -230,7 +247,7 @@ h1 {
 
 .homework-course {
   color: var(--text-secondary);
-  font-size: 0.75rem;
+  font-size: var(--font-sm);
 }
 
 .time-left {
@@ -240,7 +257,7 @@ h1 {
 
 /* ─── Section divider (expired header) ─── */
 .section-divider {
-  font-size: 0.68rem;
+  font-size: var(--font-xs);
   font-weight: 500;
   color: var(--text-tertiary);
   text-transform: uppercase;
@@ -253,7 +270,7 @@ h1 {
   text-align: center;
   padding: 36px 16px;
   color: var(--text-secondary);
-  font-size: 0.9rem;
+  font-size: var(--font-md);
 }
 
 /* ─── Footer ─── */
@@ -264,25 +281,25 @@ h1 {
   margin: 12px 16px 0;
   padding-top: 10px;
   border-top: 1px solid var(--separator);
-  font-size: 0.7rem;
+  font-size: var(--font-xs);
   color: var(--text-tertiary);
 }
 
 .export-actions { display: flex; gap: 6px; }
 
 .small-btn {
-  background: rgba(20, 147, 242, 0.1);
+  background: var(--accent-light);
   color: var(--accent);
   border: none;
   padding: 4px 10px;
   border-radius: 14px;
-  font-size: 0.7rem;
+  font-size: var(--font-xs);
   font-weight: 500;
   cursor: pointer;
   transition: background 0.12s;
 }
 
-.small-btn:hover { background: rgba(20, 147, 242, 0.18); }
+.small-btn:hover { background: var(--accent-mid); }
 
 /* ─── Settings panel (iOS grouped list style) ─── */
 .settings-panel {
@@ -294,7 +311,7 @@ h1 {
 }
 
 .settings-panel h3 {
-  font-size: 0.875rem;
+  font-size: var(--font-md);
   font-weight: 600;
   padding: 13px 16px 11px;
   border-bottom: 1px solid var(--separator);
@@ -302,7 +319,7 @@ h1 {
 
 .settings-panel label {
   display: block;
-  font-size: 0.8rem;
+  font-size: var(--font-md);
   color: var(--text-secondary);
   padding: 10px 16px;
   border-bottom: 1px solid var(--separator);
@@ -321,7 +338,7 @@ h1 {
   color: var(--text-primary);
   border: 1px solid var(--separator);
   border-radius: var(--radius-sm);
-  font-size: 0.85rem;
+  font-size: var(--font-md);
   font-family: inherit;
   -webkit-appearance: none;
   appearance: none;
@@ -330,7 +347,7 @@ h1 {
 .settings-panel input:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(20, 147, 242, 0.12);
+  box-shadow: 0 0 0 3px var(--accent-focus);
 }
 
 .checkbox-label {
@@ -361,7 +378,7 @@ h1 {
   border: none;
   padding: 8px 20px;
   border-radius: 20px;
-  font-size: 0.875rem;
+  font-size: var(--font-md);
   font-weight: 500;
   cursor: pointer;
   transition: opacity 0.15s;

@@ -27,33 +27,30 @@ Requires Chrome to be installed; Selenium manages the ChromeDriver automatically
 
 ## Architecture
 
-There are **two separate approaches** in the codebase — only `main.py`'s approach is currently active:
-
-### Active approach (`main.py`)
-Full Selenium browser automation. `WebLearningCrawler` navigates the browser through the entire flow:
+`main.py` uses full Selenium browser automation. `WebLearningCrawler` navigates the browser through the entire flow:
 1. Opens login page, waits for user to authenticate
 2. Parses the landing page HTML with BeautifulSoup to extract courses and their homework URLs
 3. Navigates to each course's homework page and scrapes the table (`<table id="wtj">`)
 4. Passes results to `src/output.py` for HTML/JSON generation
 
-### Dormant approach (`src/auth.py` + `src/crawler.py`)
-Hybrid approach: Selenium only for login/cookie extraction, then switches to a `requests.Session` for all subsequent API calls. `WebLearningAuth` extracts cookies (especially `XSRF-TOKEN`) and constructs a session with appropriate headers. `HomeworkCrawler` then calls the JSON APIs directly. This approach is **not wired into main.py**.
-
 ### `src/` module breakdown
-- `config.py` — All URLs and constants (API endpoints, timeouts, output paths)
-- `models.py` — `Course` and `Homework` dataclasses; `Homework` has computed properties `is_expired` and `urgency_level` (0=expired, 1=<24h, 2=<3d, 3=<7d, 4=later, 5=no deadline)
+- `config.py` — Login URL, base URL, and output path constants
+- `models.py` — `Homework` dataclass with computed properties `is_expired` and `urgency_level` (0=expired, 1=<24h, 2=<3d, 3=<7d, 4=later, 5=no deadline)
 - `output.py` — `generate_html()` and `generate_json()` write to `output/`; HTML is self-contained with inline CSS (dark theme, urgency-based color coding)
 
-## Key API Endpoints (from `src/config.py`)
+## Key API Endpoints
 
-- Semester list: `GET /b/wlxt/kc/v_wlkc_xs_xkb_kcb_extend/student/loadSemesterIdList`
-- Course list: `POST /b/wlxt/kc/v_wlkc_xs_xkb_kcb_extend/student/loadCourseBySemesterId`
-- Unsubmitted homework: `POST /b/wlxt/kczy/zy/student/index/zyListWj`
+These endpoints are used by the Chrome extension (`chrome-extension/lib/api.js`), not the Python crawler (which uses HTML scraping only):
 
-Authentication requires `XSRF-TOKEN` cookie + `X-XSRF-TOKEN` / `X-CSRF-Token` headers. The `Referer` header is also critical for requests to succeed.
+- Student page (courses): `GET /f/wlxt/index/course/student/` — parse HTML for course data
+- Unsubmitted homework: `POST /b/wlxt/kczy/zy/student/zyListWj` — DataTable format with `aoData=<JSON array>`
+
+Authentication requires `XSRF-TOKEN` cookie + `X-CSRF-Token` / `X-XSRF-TOKEN` headers. The `Referer` header is also critical.
 
 ## Notes
 
-- The `legacy/` directory contains old experimental scripts; ignore them.
-- `src/crawler.py` uses `HOMEWORK_SUBMITTED_URL` in config but `HomeworkCrawler.get_homework()` only fetches unsubmitted homework — submitted homework fetching is stubbed out.
-- The README mentions a `--semester` flag that does not exist in the current `main.py`; it only exists in the dormant `HomeworkCrawler`.
+- The README mentions a `--semester` flag that does not exist in the current `main.py`.
+
+## Chrome Extension Rules
+
+- Service workers have restricted APIs — do NOT use DOMParser, document, or other DOM APIs in service worker scripts. Use regex or string parsing instead.

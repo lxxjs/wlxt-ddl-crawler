@@ -94,8 +94,6 @@ function sortHomework(homeworkList) {
 }
 
 export {
-  parseDeadline,
-  isExpired,
   urgencyLevel,
   formatTimeLeft,
   normalizeHomework,

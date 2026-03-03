@@ -91,4 +91,4 @@ function downloadICS(homeworkList) {
   URL.revokeObjectURL(url);
 }
 
-export { generateTextList, generateICS, downloadICS };
+export { generateTextList, downloadICS };
