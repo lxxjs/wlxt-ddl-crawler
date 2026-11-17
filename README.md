@@ -57,3 +57,22 @@ The `chrome-extension/` directory contains a Manifest V3 extension that:
 - Exports to clipboard (text) or `.ics` (Apple Reminders)
 
 Load it in Chrome via **Extensions → Load unpacked** and point to `chrome-extension/`.
+
+### Log in once
+
+Log in to 网络学堂 once in the same Chrome profile. After that the extension keeps itself logged in:
+
+1. A keep-alive request every 10 minutes stops the session from idling out.
+2. If the session still expires (for example after restarting Chrome), it is restored silently through the login that `id.tsinghua.edu.cn` remembers for this browser. No password is involved.
+3. If that is not possible and you saved your username and password in the extension settings, the login page is opened in a background tab, filled in, submitted once, and closed again. Turn this off with **会话过期时自动登录**. Saved credentials live unencrypted in `chrome.storage.local`.
+4. Only when a step needs you (二次认证, captcha, wrong password) do you get a notification; click it to finish logging in.
+
+While logged out, or when some courses fail to load, the popup keeps showing the last known homework and says so, instead of showing an empty list.
+
+### Tests
+
+```bash
+node chrome-extension/tests/test-models.mjs
+node chrome-extension/tests/test-parsing.mjs
+node chrome-extension/tests/test-flow.mjs
+```

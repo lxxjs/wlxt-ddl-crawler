@@ -2,7 +2,7 @@
  * Popup script: renders homework list, handles settings and export.
  */
 
-import { getCredentials, saveCredentials, getSettings, saveSettings } from '../lib/storage.js';
+import { getCredentials, saveCredentials, getSettings, saveSettings, clampInterval } from '../lib/storage.js';
 import { generateTextList, downloadICS } from '../lib/export.js';
 
 // DOM elements
@@ -18,6 +18,31 @@ const updatedAtEl = $('#updated-at');
 const settingsPanel = $('#settings-panel');
 
 let currentHomework = [];
+
+const VERSION = chrome.runtime.getManifest().version;
+// Deadlines are shown in Beijing time; say so when this machine is elsewhere.
+const TZ_NOTE = new Date().getTimezoneOffset() === -480 ? '' : ' 北京时间';
+
+function formatUpdatedAt(timestamp) {
+  const time = new Date(timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+  return `v${VERSION} · 更新: ${time}`;
+}
+
+/**
+ * Explain anything that makes the list on screen less than fully current.
+ */
+function showFetchWarnings({ lastError, failedCourses }) {
+  if (lastError === 'logging_in') {
+    showStatus('会话已过期，正在后台自动登录…');
+  } else if (lastError === 'session_expired') {
+    loginPrompt.classList.remove('hidden');
+    showStatus('会话已过期 — 以下为上次获取的数据', true);
+  } else if (lastError) {
+    showStatus(`上次刷新失败，以下为旧数据: ${lastError}`, true);
+  } else if (failedCourses?.length) {
+    showStatus(`${failedCourses.length} 门课程获取失败，已保留旧数据: ${failedCourses.join('、')}`, true);
+  }
+}
 
 // --- Init ---
 
@@ -37,11 +62,9 @@ async function loadHomework() {
 
   currentHomework = response.homework;
   renderHomework(currentHomework);
+  showFetchWarnings(response);
 
-  if (response.updatedAt) {
-    const date = new Date(response.updatedAt);
-    updatedAtEl.textContent = `更新: ${date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`;
-  }
+  updatedAtEl.textContent = response.updatedAt ? formatUpdatedAt(response.updatedAt) : `v${VERSION}`;
 }
 
 /**
@@ -57,16 +80,19 @@ async function doRefresh() {
 
   btn.classList.remove('spinning');
 
-  if (result.success) {
+  if (result?.success) {
     currentHomework = result.homework;
     renderHomework(currentHomework);
-    updatedAtEl.textContent = `v1.1.0 · 更新: ${new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`;
-    hideStatus();
-  } else if (result.error === 'session_expired') {
+    updatedAtEl.textContent = formatUpdatedAt(Date.now());
+    showFetchWarnings(result);
+  } else if (result?.error === 'logging_in') {
+    showStatus('会话已过期，正在后台自动登录…');
+  } else if (result?.error === 'session_expired') {
     loginPrompt.classList.remove('hidden');
-    showStatus('会话已过期 — 请在浏览器中登录网络学堂，然后点击刷新', true);
+    showStatus('会话已过期 — 请登录网络学堂，登录后会自动刷新', true);
   } else {
-    showStatus(`获取失败: ${result.error}`, true);
+    // The list on screen (if any) is the previous successful fetch.
+    showStatus(`获取失败: ${result?.error ?? '未知错误'}`, true);
   }
 
   return result;
@@ -126,12 +152,14 @@ function createCard(hw) {
 
   const deadlineClass = hw.urgency === 1 ? 'urgent' : hw.urgency === 2 ? 'warning' : '';
   const timeLeftHtml = hw.timeLeft ? `<span class="time-left">(${escapeHtml(hw.timeLeft)})</span>` : '';
+  const deadlineText = hw.deadlineStr ? `${hw.deadlineStr}${TZ_NOTE}` : '无截止日期';
+  const staleHtml = hw.stale ? ' <span class="stale-tag" title="本次刷新未能获取该课程，显示的是旧数据">旧</span>' : '';
 
   card.innerHTML = `
     <div class="homework-header">
-      <span class="homework-title">${escapeHtml(hw.title)}</span>
+      <span class="homework-title">${escapeHtml(hw.title)}${staleHtml}</span>
       <span class="homework-deadline ${deadlineClass}">
-        ${escapeHtml(hw.deadlineStr || '无截止日期')} ${timeLeftHtml}
+        ${escapeHtml(deadlineText)} ${timeLeftHtml}
       </span>
     </div>
     <div class="homework-course">${escapeHtml(hw.courseName)}</div>
@@ -182,6 +210,7 @@ function setupListeners() {
       $('#input-password').value = creds?.password || '';
       $('#input-interval').value = settings.refreshInterval;
       $('#input-notifications').checked = settings.notifications;
+      $('#input-autologin').checked = settings.autoLogin;
     }
   });
 
@@ -189,14 +218,16 @@ function setupListeners() {
   $('#btn-save-settings').addEventListener('click', async () => {
     const username = $('#input-username').value.trim();
     const password = $('#input-password').value;
-    const interval = parseInt($('#input-interval').value) || 30;
+    const interval = clampInterval($('#input-interval').value);
     const notifications = $('#input-notifications').checked;
+    const autoLogin = $('#input-autologin').checked;
 
     if (username && password) {
       await saveCredentials(username, password);
+      chrome.runtime.sendMessage({ type: 'CREDENTIALS_UPDATED' });
     }
 
-    await saveSettings({ refreshInterval: interval, notifications });
+    await saveSettings({ refreshInterval: interval, notifications, autoLogin });
     chrome.runtime.sendMessage({ type: 'UPDATE_ALARM', interval });
 
     settingsPanel.classList.add('hidden');
@@ -229,8 +260,8 @@ function setupListeners() {
     if (message.type === 'LOGIN_SUCCESS' && message.success) {
       currentHomework = message.homework || [];
       renderHomework(currentHomework);
-      loginPrompt.classList.add('hidden');
-      hideStatus();
+      updatedAtEl.textContent = formatUpdatedAt(Date.now());
+      showFetchWarnings(message);
     }
   });
 }

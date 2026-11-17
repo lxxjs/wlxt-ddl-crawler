@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.2.0] — 2026-11-17
+
+### Chrome Extension — reliability
+- A failed fetch no longer shows up as "no homework": course-list and per-course failures are reported, the previous cache is kept, and items of failed courses are marked as stale in the popup
+- Deadlines are parsed as Beijing time regardless of the machine's timezone, and epoch-millisecond `jzsj` values no longer throw
+- Course list now comes from the JSON API (`getCurrentAndNextSemester` → `loadCourseBySemesterId`) instead of regex over the student page; the HTML scrape remains only as a fallback
+- Urgent-deadline notifications fire once per homework instead of on every refresh
+- Concurrent refreshes share one run; refresh interval is clamped to 5–120 minutes
+- Removed the `Referer` request header, which `fetch()` silently drops
+
+### Chrome Extension — log in once
+- Keep-alive alarm every 10 minutes
+- Silent session restore through id.tsinghua.edu.cn's remembered login (`checkSingle`), using the device fingerprint recorded on the login page
+- Optional background-tab auto login with saved credentials (new setting, on by default; one submission per attempt, stops on wrong password / 2FA / captcha)
+- "Please log in" notification is sent once per expiry and focuses the tab that needs attention
+
+### Python
+- Deadlines are timezone-aware (Beijing time), so urgency is correct outside UTC+8
+
+### Tests
+- Added `tests/test-flow.mjs`: drives the real service worker against a fake 网络学堂
+
 ## [Unreleased] — 2026-03-03
 
 ### Chrome Extension — JS

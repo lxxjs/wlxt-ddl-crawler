@@ -2,8 +2,17 @@
 Data models for courses and homework.
 """
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Optional
+
+# 网络学堂 shows every time in Beijing time (UTC+8, no DST). Deadlines are
+# stored timezone-aware so they stay correct when this runs elsewhere.
+BEIJING_TZ = timezone(timedelta(hours=8), "CST")
+
+
+def _now_like(deadline: datetime) -> datetime:
+    """Current time, comparable with `deadline` (aware or naive)."""
+    return datetime.now(deadline.tzinfo)
 
 
 @dataclass
@@ -26,7 +35,7 @@ class Homework:
     def is_expired(self) -> bool:
         """Check if homework deadline has passed."""
         if self.deadline:
-            return datetime.now() > self.deadline
+            return _now_like(self.deadline) > self.deadline
         return False
     
     @property
@@ -43,7 +52,7 @@ class Homework:
         if not self.deadline:
             return 5  # No deadline - lowest priority
 
-        now = datetime.now()
+        now = _now_like(self.deadline)
         if now > self.deadline:
             return 0
 

@@ -42,14 +42,31 @@ Requires Chrome to be installed; Selenium manages the ChromeDriver automatically
 
 These endpoints are used by the Chrome extension (`chrome-extension/lib/api.js`), not the Python crawler (which uses HTML scraping only):
 
-- Student page (courses): `GET /f/wlxt/index/course/student/` — parse HTML for course data
+- Current semester: `GET /b/kc/zhjw_v_code_xnxq/getCurrentAndNextSemester` — `result.id`
+- Courses: `GET /b/wlxt/kc/v_wlkc_xs_xkb_kcb_extend/student/loadCourseBySemesterId/{semester}/zh` — `resultList[]` (`wlkcid`, `kcm`, `jsm`)
 - Unsubmitted homework: `POST /b/wlxt/kczy/zy/student/zyListWj` — DataTable format with `aoData=<JSON array>`
+- Student page: `GET /f/wlxt/index/course/student/` — session probe and `_csrf` source only. The page fills its course list with JavaScript, so scraping it for courses is just a last-resort fallback.
 
-Authentication requires `XSRF-TOKEN` cookie + `X-CSRF-Token` / `X-XSRF-TOKEN` headers. The `Referer` header is also critical.
+Authentication requires the session cookie plus the CSRF token as the `_csrf` query parameter (also sent as `X-CSRF-Token` / `X-XSRF-TOKEN`). `fetch()` cannot set `Referer`; do not rely on it.
 
-## Notes
+Endpoints and field names follow [thu-learn-lib](https://github.com/Harry-Chen/thu-learn-lib); check there first when the site changes.
 
-- The README mentions a `--semester` flag that does not exist in the current `main.py`.
+## Chrome Extension Behaviour
+
+- **A failed fetch must never look like "no homework".** `getAllHomework()` throws when the course list or every course fails, and reports partially failed courses; the service worker then keeps the previous cache (items of failed courses are marked `stale`).
+- **Deadlines are Beijing time.** `parseDeadline()` accepts epoch timestamps or `YYYY-MM-DD HH:MM[:SS]` strings and never uses the machine's timezone. `src/models.py` uses `BEIJING_TZ` for the same reason.
+- **Notifications are sent once per homework** (`selectNewUrgent()`), and the "please log in" notification once per expiry.
+- **Session recovery** (`ensureSession()` in the service worker), in order: silent SSO re-login via `checkSingle` using the fingerprint recorded by `content/autofill.js` → background-tab login with saved credentials (opt-out in settings, submitted at most once per attempt, stops after a wrong password / 2FA / captcha) → ask the user. A keep-alive alarm touches the session every 10 minutes.
+
+## Tests
+
+```bash
+node chrome-extension/tests/test-models.mjs    # deadline parsing, urgency, merge, notification dedupe
+node chrome-extension/tests/test-parsing.mjs   # API/HTML response parsing, auth helpers
+node chrome-extension/tests/test-flow.mjs      # service worker against a fake 网络学堂 (fake chrome.* + fetch)
+```
+
+The fake server in `test-flow.mjs` is modelled on thu-learn-lib, not recorded from the live site.
 
 ## Chrome Extension Rules
 

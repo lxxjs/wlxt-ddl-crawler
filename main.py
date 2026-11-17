@@ -23,7 +23,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from bs4 import BeautifulSoup
 
-from src.models import Homework
+from src.models import Homework, BEIJING_TZ
 from src.output import generate_html, generate_json
 from src.config import LOGIN_URL, BASE_URL
 
@@ -274,7 +274,8 @@ class WebLearningCrawler:
                 if deadline_str:
                     for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"]:
                         try:
-                            deadline = datetime.strptime(deadline_str, fmt)
+                            # The page shows Beijing time, wherever this runs
+                            deadline = datetime.strptime(deadline_str, fmt).replace(tzinfo=BEIJING_TZ)
                             break
                         except ValueError:
                             continue

@@ -1,22 +1,60 @@
 /**
  * API client for 网络学堂.
- * Course list: parsed from the student HTML page (like main.py).
+ * Semester:    GET  /b/kc/zhjw_v_code_xnxq/getCurrentAndNextSemester
+ * Course list: GET  /b/wlxt/kc/v_wlkc_xs_xkb_kcb_extend/student/loadCourseBySemesterId/{semester}/zh
  * Homework:    POST /b/wlxt/kczy/zy/student/zyListWj with aoData format.
+ *
+ * Every request can fail, and a failure must never look like "no homework":
+ * getAllHomework() reports which courses failed and throws when nothing
+ * could be fetched at all.
  */
 
 import { getCsrfToken, BASE_URL, STUDENT_PAGE, consumeCachedStudentHtml } from './auth.js';
 import { normalizeHomework, sortHomework } from './models.js';
 
+const SEMESTER_API = `${BASE_URL}/b/kc/zhjw_v_code_xnxq/getCurrentAndNextSemester`;
+const courseListApi = (semesterId) =>
+  `${BASE_URL}/b/wlxt/kc/v_wlkc_xs_xkb_kcb_extend/student/loadCourseBySemesterId/${semesterId}/zh`;
 const HOMEWORK_API = `${BASE_URL}/b/wlxt/kczy/zy/student/zyListWj`;
+
+const CONCURRENCY = 3;
+
+/**
+ * Fetch a JSON endpoint with the session cookie and CSRF token.
+ * Throws on HTTP errors, on being bounced to a login page, and on non-JSON
+ * bodies (an expired session answers with an HTML login page).
+ */
+async function fetchJson(url, init = {}) {
+  const csrf = await getCsrfToken();
+  const sep = url.includes('?') ? '&' : '?';
+
+  const resp = await fetch(`${url}${sep}_csrf=${encodeURIComponent(csrf)}`, {
+    ...init,
+    credentials: 'include',
+    headers: {
+      'X-Requested-With': 'XMLHttpRequest',
+      'X-CSRF-Token': csrf,
+      'X-XSRF-TOKEN': csrf,
+      ...init.headers,
+    },
+  });
+
+  if (!resp.ok) throw new Error(`HTTP ${resp.status} from ${url}`);
+  if (resp.url.includes('login')) throw new Error(`Session expired (redirected to login) for ${url}`);
+
+  const text = await resp.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(`Non-JSON response from ${url}`);
+  }
+}
 
 /**
  * POST to a DataTable-style API endpoint.
  * Sends aoData as a JSON array (matches the wlxt DataTable plugin format).
- * CSRF token must be both in the URL query param AND X-CSRF-Token header.
  */
-async function dtPost(url, extraParams = []) {
-  const csrf = await getCsrfToken();
-
+function dtPost(url, extraParams = []) {
   const aoData = [
     { name: 'sEcho',          value: '1' },
     { name: 'iColumns',       value: '5' },
@@ -31,25 +69,49 @@ async function dtPost(url, extraParams = []) {
     ...extraParams,
   ];
 
-  const resp = await fetch(`${url}?_csrf=${encodeURIComponent(csrf)}`, {
+  return fetchJson(url, {
     method: 'POST',
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-      'X-Requested-With': 'XMLHttpRequest',
-      'X-CSRF-Token': csrf,
-      'X-XSRF-TOKEN': csrf,
-      'Referer': STUDENT_PAGE,
-    },
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
     body: `aoData=${encodeURIComponent(JSON.stringify(aoData))}`,
   });
+}
 
-  if (!resp.ok) throw new Error(`HTTP ${resp.status} from ${url}`);
-  return resp.json();
+/**
+ * Read the current semester id (e.g. "2026-2027-1") from the semester API.
+ * Throws when the response is not the expected shape.
+ * Exported for testing.
+ */
+export function parseSemesterResponse(data) {
+  const id = data?.result?.id;
+  if (typeof id !== 'string' || !id) {
+    throw new Error('Unexpected semester response');
+  }
+  return id;
+}
+
+/**
+ * Turn the course list API response into [{ id, name, teacher }].
+ * Throws when the response is not the expected shape, so a broken response
+ * is never mistaken for "enrolled in zero courses".
+ * Exported for testing.
+ */
+export function parseCourseListResponse(data) {
+  if (!Array.isArray(data?.resultList)) {
+    throw new Error('Unexpected course list response');
+  }
+  return data.resultList
+    .filter(c => c?.wlkcid)
+    .map(c => ({
+      id: c.wlkcid,
+      name: c.kcm || c.zywkcm || c.ywkcm || 'Unknown Course',
+      teacher: c.jsm || '',
+    }));
 }
 
 /**
  * Parse course IDs, names, and teachers from the student page HTML.
+ * Only used as a fallback when the JSON course API fails: the live page
+ * fills its course list with JavaScript, so this often finds nothing.
  * Exported for testing.
  */
 export function parseCoursesFromHtml(html) {
@@ -72,8 +134,6 @@ export function parseCoursesFromHtml(html) {
     if (allWlkcids.length) break;
   }
 
-  console.log(`[api] parseCoursesFromHtml: matched ${allWlkcids.length} wlkcid inputs`);
-
   for (const match of allWlkcids) {
     const wlkcid = match[1];
     const after = html.substring(match.index, match.index + 2000);
@@ -91,22 +151,27 @@ export function parseCoursesFromHtml(html) {
 }
 
 /**
- * Get courses by parsing the student HTML landing page.
+ * Get the current semester's courses from the JSON API.
+ * Falls back to scraping the student page only if the API fails and the
+ * scrape actually finds courses; otherwise the API error is rethrown.
  */
 async function getCourses() {
-  // Reuse HTML cached by isSessionValid() to avoid a duplicate fetch
-  let html = consumeCachedStudentHtml();
-  if (!html) {
-    const csrf = await getCsrfToken();
-    const resp = await fetch(STUDENT_PAGE, {
-      credentials: 'include',
-      headers: { 'X-CSRF-Token': csrf, 'X-XSRF-TOKEN': csrf },
-    });
-    if (!resp.ok) throw new Error(`Failed to fetch student page: HTTP ${resp.status}`);
-    html = await resp.text();
-  }
+  try {
+    const semesterId = parseSemesterResponse(await fetchJson(SEMESTER_API));
+    return parseCourseListResponse(await fetchJson(courseListApi(semesterId)));
+  } catch (apiError) {
+    console.warn('[api] course API failed, trying student page HTML:', apiError);
 
-  return parseCoursesFromHtml(html);
+    let html = consumeCachedStudentHtml();
+    if (!html) {
+      const resp = await fetch(STUDENT_PAGE, { credentials: 'include' }).catch(() => null);
+      html = resp?.ok ? await resp.text() : '';
+    }
+
+    const courses = parseCoursesFromHtml(html);
+    if (!courses.length) throw apiError;
+    return courses;
+  }
 }
 
 /**
@@ -119,6 +184,20 @@ export function parseHomeworkResponse(data) {
 }
 
 /**
+ * Like parseHomeworkResponse, but throws when the response is not a homework
+ * list at all (error payload, missing aaData) instead of returning [].
+ * Exported for testing.
+ */
+export function requireHomeworkRows(data) {
+  if (data?.result && data.result !== 'success') {
+    throw new Error(`Homework API returned result=${data.result}`);
+  }
+  const rows = data?.object?.aaData ?? data?.aaData;
+  if (!Array.isArray(rows)) throw new Error('Unexpected homework response');
+  return rows;
+}
+
+/**
  * Get unsubmitted homework for a single course.
  */
 async function getCourseHomework(course) {
@@ -126,39 +205,49 @@ async function getCourseHomework(course) {
     { name: 'wlkcid', value: course.id },
   ]);
 
-  const rows = parseHomeworkResponse(data);
-  console.log(`[api] getCourseHomework(${course.name}): ${rows.length} rows`);
-  return rows.map(item => normalizeHomework(item, course.name, course.id));
+  return requireHomeworkRows(data).map(item => normalizeHomework(item, course.name, course.id));
 }
 
 /**
- * Fetch all homework across all courses with concurrency limit.
+ * Fetch all homework across all courses with a concurrency limit.
+ *
+ * Returns { homework, courseCount, failedCourses: [{ id, name, error }] }.
+ * Throws if the course list cannot be loaded or if every course failed.
  */
 async function getAllHomework() {
   const courses = await getCourses();
-  if (!courses.length) {
-    console.warn('[api] getAllHomework: no courses found — course parsing may have failed');
-    return [];
-  }
 
-  console.log(`[api] getAllHomework: fetching homework for ${courses.length} course(s)`);
-
-  const allHomework = [];
-  const CONCURRENCY = 3;
+  const homework = [];
+  const failedCourses = [];
 
   for (let i = 0; i < courses.length; i += CONCURRENCY) {
     const batch = courses.slice(i, i + CONCURRENCY);
     const results = await Promise.allSettled(batch.map(c => getCourseHomework(c)));
-    for (const result of results) {
+
+    results.forEach((result, idx) => {
+      const course = batch[idx];
       if (result.status === 'fulfilled') {
-        allHomework.push(...result.value);
+        homework.push(...result.value);
       } else {
-        console.warn('[api] Failed to fetch homework for a course:', result.reason);
+        console.warn(`[api] homework fetch failed for ${course.name}:`, result.reason);
+        failedCourses.push({
+          id: course.id,
+          name: course.name,
+          error: result.reason?.message || String(result.reason),
+        });
       }
-    }
+    });
   }
 
-  return sortHomework(allHomework);
+  if (courses.length && failedCourses.length === courses.length) {
+    throw new Error(`All ${courses.length} course requests failed: ${failedCourses[0].error}`);
+  }
+
+  return {
+    homework: sortHomework(homework),
+    courseCount: courses.length,
+    failedCourses,
+  };
 }
 
 export { getAllHomework };
