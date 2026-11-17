@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.1] — 2026-11-17
+
+### Chrome Extension
+- Logging out of 网络学堂 no longer shows "获取失败: Failed to fetch". Whether we are logged in is now decided by a real API call (`probeSession()`), not by how the student page looks; requests bypass the HTTP cache and do not follow redirects, since a redirect from the API means "log in"
+- Being offline is reported as such ("无法连接网络学堂") and no longer triggers the login prompt, a login notification, a background login tab, or the "!" badge
+- Background-tab login attempts are counted since the last successful fetch (max 2), so a login that completes while the API still refuses us cannot loop
+
 ## [1.2.0] — 2026-11-17
 
 ### Chrome Extension — reliability

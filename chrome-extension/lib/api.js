@@ -10,11 +10,11 @@
  */
 
 import {
-  getCsrfToken, BASE_URL, STUDENT_PAGE, consumeCachedStudentHtml, SessionExpiredError,
+  getCsrfToken, fetchNoFollow, BASE_URL, STUDENT_PAGE, SEMESTER_API,
+  consumeCachedStudentHtml, SessionExpiredError, NetworkError,
 } from './auth.js';
 import { normalizeHomework, sortHomework } from './models.js';
 
-const SEMESTER_API = `${BASE_URL}/b/kc/zhjw_v_code_xnxq/getCurrentAndNextSemester`;
 const courseListApi = (semesterId) =>
   `${BASE_URL}/b/wlxt/kc/v_wlkc_xs_xkb_kcb_extend/student/loadCourseBySemesterId/${semesterId}/zh`;
 const HOMEWORK_API = `${BASE_URL}/b/wlxt/kczy/zy/student/zyListWj`;
@@ -24,16 +24,16 @@ const CONCURRENCY = 3;
 /**
  * Fetch a JSON endpoint with the session cookie and CSRF token.
  * Throws SessionExpiredError when the server treats us as logged out (HTTP
- * 403 or a bounce to a login page), and a plain Error on other HTTP errors
+ * 403 or a redirect, which here means "go to the login page"), NetworkError
+ * when there was no answer at all, and a plain Error on other HTTP errors
  * and non-JSON bodies.
  */
 async function fetchJson(url, init = {}) {
   const csrf = await getCsrfToken();
   const sep = url.includes('?') ? '&' : '?';
 
-  const resp = await fetch(`${url}${sep}_csrf=${encodeURIComponent(csrf)}`, {
+  const result = await fetchNoFollow(`${url}${sep}_csrf=${encodeURIComponent(csrf)}`, {
     ...init,
-    credentials: 'include',
     headers: {
       'X-Requested-With': 'XMLHttpRequest',
       'X-CSRF-Token': csrf,
@@ -42,9 +42,11 @@ async function fetchJson(url, init = {}) {
     },
   });
 
-  if (resp.status === 403 || resp.url.includes('login')) {
-    throw new SessionExpiredError(`Session rejected (HTTP ${resp.status}) by ${url}`);
-  }
+  if (result.kind === 'unreachable') throw new NetworkError(`No response from ${url}`);
+  if (result.kind === 'redirect') throw new SessionExpiredError(`Redirected to login by ${url}`);
+
+  const { resp } = result;
+  if (resp.status === 403) throw new SessionExpiredError(`Session rejected (HTTP 403) by ${url}`);
   if (!resp.ok) throw new Error(`HTTP ${resp.status} from ${url}`);
 
   const text = await resp.text();
@@ -165,12 +167,12 @@ async function getCourses() {
     const semesterId = parseSemesterResponse(await fetchJson(SEMESTER_API));
     return parseCourseListResponse(await fetchJson(courseListApi(semesterId)));
   } catch (apiError) {
-    if (apiError instanceof SessionExpiredError) throw apiError;
+    if (apiError instanceof SessionExpiredError || apiError instanceof NetworkError) throw apiError;
     console.warn('[api] course API failed, trying student page HTML:', apiError);
 
     let html = consumeCachedStudentHtml();
     if (!html) {
-      const resp = await fetch(STUDENT_PAGE, { credentials: 'include' }).catch(() => null);
+      const resp = await fetch(STUDENT_PAGE, { credentials: 'include', cache: 'no-store' }).catch(() => null);
       html = resp?.ok ? await resp.text() : '';
     }
 
@@ -241,6 +243,7 @@ async function getAllHomework() {
           name: course.name,
           error: result.reason?.message || String(result.reason),
           sessionExpired: result.reason instanceof SessionExpiredError,
+          network: result.reason instanceof NetworkError,
         });
       }
     });
@@ -248,9 +251,9 @@ async function getAllHomework() {
 
   if (courses.length && failedCourses.length === courses.length) {
     const message = `All ${courses.length} course requests failed: ${failedCourses[0].error}`;
-    throw failedCourses.every(c => c.sessionExpired)
-      ? new SessionExpiredError(message)
-      : new Error(message);
+    if (failedCourses.every(c => c.sessionExpired)) throw new SessionExpiredError(message);
+    if (failedCourses.every(c => c.network)) throw new NetworkError(message);
+    throw new Error(message);
   }
 
   return {
