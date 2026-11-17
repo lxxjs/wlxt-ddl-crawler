@@ -63,9 +63,18 @@ Endpoints and field names follow [thu-learn-lib](https://github.com/Harry-Chen/t
 - **Offline is not logged out.** When the site cannot be reached the popup says so and keeps the cached list; nothing else changes.
 - **Session recovery** (`ensureSession()` in the service worker), in order: silent SSO re-login via `checkSingle` using the fingerprint recorded by `content/autofill.js` → background-tab login with saved credentials (opt-out in settings, submitted at most once per attempt, stops after a wrong password / 2FA / captcha) → ask the user. A keep-alive alarm probes the session every 10 minutes. Background-tab logins are limited to 2 attempts since the last successful homework fetch.
 
+## Credentials and Permissions
+
+- **Saved credentials are encrypted at rest and only the service worker can read them** (`lib/credentials.js`): AES-GCM, with a non-extractable key kept in IndexedDB; `chrome.storage.local.credentials` holds `{ v: 2, iv, data }`. Do not read or write that key anywhere else, and do not import `lib/credentials.js` from the popup or a content script.
+  - The popup talks to the service worker: `GET_CREDENTIAL_STATUS` (saved? which username — never the password), `SAVE_CREDENTIALS`, `CLEAR_CREDENTIALS`. These are accepted only from the extension's own pages.
+  - `content/autofill.js` receives `{ username, password }` in the `LOGIN_PAGE_READY` reply, and only when the sender is the top frame of `https://id.tsinghua.edu.cn/do/off/ui/auth/login…`.
+  - This keeps the password out of plain-text storage, backups and storage dumps. It cannot protect against something running as the same Chrome profile; an extension that logs in unattended must be able to recover the password.
+- **Permissions are minimal on purpose:** `storage`, `alarms`, `webNavigation`, `notifications`, and host access to `learn.tsinghua.edu.cn` and `id.tsinghua.edu.cn` only. `chrome.tabs.create/get/update/remove` need no `tabs` permission. Do not add `cookies`, `tabs`, `scripting` or wider hosts without a concrete need.
+
 ## Tests
 
 ```bash
+node chrome-extension/tests/test-credentials.mjs  # encrypted credential storage (real WebCrypto, fake IndexedDB)
 node chrome-extension/tests/test-models.mjs    # deadline parsing, urgency, merge, notification dedupe
 node chrome-extension/tests/test-parsing.mjs   # API/HTML response parsing, auth helpers
 node chrome-extension/tests/test-flow.mjs      # service worker against a fake 网络学堂 (fake chrome.* + fetch)

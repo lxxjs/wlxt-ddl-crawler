@@ -25,11 +25,14 @@ import {
 } from '../lib/auth.js';
 import { getAllHomework } from '../lib/api.js';
 import {
-  saveHomeworkCache, getHomeworkCache, getSettings, getCredentials, clampInterval,
+  saveHomeworkCache, getHomeworkCache, getSettings, clampInterval,
   getRefreshStatus, saveRefreshStatus, getNotified, saveNotified,
   getSessionState, saveSessionState, getAutoLoginState, saveAutoLoginState,
 } from '../lib/storage.js';
 import { refreshComputedFields, mergeWithPrevious, selectNewUrgent } from '../lib/models.js';
+import {
+  getCredentials, saveCredentials, clearCredentials, getCredentialStatus,
+} from '../lib/credentials.js';
 
 const REFRESH_ALARM = 'refreshHomework';
 const KEEPALIVE_ALARM = 'keepSessionAlive';
@@ -41,7 +44,7 @@ const AUTO_LOGIN_MAX_FAILURES = 2;
 const AUTO_LOGIN_MIN_GAP_MS = 10 * 60 * 1000;
 
 const LOGIN_NOTIFICATION_ID = 'login-required';
-const ID_ORIGIN = 'https://id.tsinghua.edu.cn/';
+const LOGIN_PAGE_PREFIX = 'https://id.tsinghua.edu.cn/do/off/ui/auth/login';
 const RED = '#ff4757';
 const GREEN = '#2ed573';
 
@@ -51,6 +54,10 @@ async function setupAlarmsAndRefresh() {
   const settings = await getSettings();
   chrome.alarms.create(REFRESH_ALARM, { periodInMinutes: settings.refreshInterval });
   chrome.alarms.create(KEEPALIVE_ALARM, { periodInMinutes: KEEPALIVE_MINUTES });
+  // Reading once encrypts credentials an older version stored as plain text,
+  // and drops the token the removed cookie-bridge script used to store.
+  await getCredentials().catch(() => {});
+  await chrome.storage.local.remove('xsrfToken').catch(() => {});
   await refreshHomework();
 }
 
@@ -396,28 +403,55 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
   }
 
-  if (message.type === 'CREDENTIALS_UPDATED') {
-    // New credentials deserve a fresh set of auto-login attempts.
-    getAutoLoginState()
-      .then(state => saveAutoLoginState({ ...state, failures: 0, lastAttemptAt: 0 }))
-      .then(() => sendResponse({ ok: true }));
+  // ── Credentials: only the service worker can read or write them. ──
+  // The three messages below are accepted from the extension's own pages
+  // (the popup, also when opened in a tab) only — never from a content
+  // script, whose sender.url is the web page it runs in.
+  const fromExtensionPage = sender.id === chrome.runtime.id
+    && !!sender.url?.startsWith(chrome.runtime.getURL(''));
+
+  if (message.type === 'GET_CREDENTIAL_STATUS') {
+    if (!fromExtensionPage) { sendResponse({ saved: false, username: '' }); return false; }
+    getCredentialStatus().then(sendResponse, () => sendResponse({ saved: false, username: '' }));
     return true;
   }
 
-  // The two messages below come from content/autofill.js on the login page.
-  const fromLoginPage = sender.tab && sender.url?.startsWith(ID_ORIGIN);
+  if (message.type === 'SAVE_CREDENTIALS') {
+    if (!fromExtensionPage || !message.username || !message.password) {
+      sendResponse({ ok: false });
+      return false;
+    }
+    saveCredentials(message.username, message.password)
+      // New credentials deserve a fresh set of auto-login attempts.
+      .then(() => getAutoLoginState())
+      .then(state => saveAutoLoginState({ ...state, failures: 0, lastAttemptAt: 0 }))
+      .then(() => sendResponse({ ok: true }), (e) => sendResponse({ ok: false, error: e.message }));
+    return true;
+  }
+
+  if (message.type === 'CLEAR_CREDENTIALS') {
+    if (!fromExtensionPage) { sendResponse({ ok: false }); return false; }
+    clearCredentials().then(() => sendResponse({ ok: true }), (e) => sendResponse({ ok: false, error: e.message }));
+    return true;
+  }
+
+  // The two messages below come from content/autofill.js. The browser sets
+  // sender.url, so a page cannot pretend to be the login page; only the top
+  // frame of the real id.tsinghua.edu.cn login page is ever given credentials.
+  const fromLoginPage = !!sender.tab && sender.frameId === 0
+    && !!sender.url?.startsWith(LOGIN_PAGE_PREFIX);
 
   if (message.type === 'LOGIN_PAGE_READY') {
     if (!fromLoginPage) {
-      sendResponse({ pending: false, autoSubmit: false });
+      sendResponse({ pending: false, autoSubmit: false, credentials: null });
       return false;
     }
-    getAutoLoginState().then(async (state) => {
+    Promise.all([getAutoLoginState(), getCredentials().catch(() => null)]).then(async ([state, credentials]) => {
       const pending = state.pendingTabId === sender.tab.id;
       // Submit at most once per attempt, so an error page cannot cause a loop.
-      const autoSubmit = pending && !state.submitted;
+      const autoSubmit = pending && !state.submitted && !!credentials;
       if (autoSubmit) await saveAutoLoginState({ ...state, submitted: true });
-      sendResponse({ pending, autoSubmit });
+      sendResponse({ pending, autoSubmit, credentials });
     });
     return true;
   }

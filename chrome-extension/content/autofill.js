@@ -4,7 +4,9 @@
  * 1. Records the device fingerprint the login page computes, so the service
  *    worker can later restore an expired session without a password
  *    (see trySilentLogin in lib/auth.js).
- * 2. Auto-fills saved credentials.
+ * 2. Auto-fills saved credentials. They are stored encrypted and this script
+ *    cannot read them itself: the service worker hands them over, and only
+ *    to the top frame of this login page.
  * 3. Submits the form ONLY when the service worker opened this tab for a
  *    background auto login. On a page the user opened, they click login.
  * 4. In a background login tab, reports anything only the user can resolve
@@ -17,8 +19,9 @@
 
   captureFingerprint();
 
-  // Ask the service worker whether this tab is its background login tab.
-  let ctx = { pending: false, autoSubmit: false };
+  // Ask the service worker for the saved credentials (if any) and whether
+  // this tab is its background login tab.
+  let ctx = { pending: false, autoSubmit: false, credentials: null };
   try {
     ctx = (await chrome.runtime.sendMessage({ type: 'LOGIN_PAGE_READY' })) || ctx;
   } catch (e) {
@@ -35,8 +38,7 @@
       }
     }
 
-    const result = await chrome.storage.local.get('credentials');
-    const creds = result.credentials;
+    const creds = ctx.credentials;
     if (!creds?.username || !creds?.password) return;
 
     // Wait for form inputs to appear

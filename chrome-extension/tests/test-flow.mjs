@@ -9,6 +9,7 @@
  */
 
 import assert from 'node:assert/strict';
+import { createFakeIndexedDB } from './helpers/fake-indexeddb.mjs';
 
 const LEARN = 'https://learn.tsinghua.edu.cn';
 const ID = 'https://id.tsinghua.edu.cn';
@@ -145,20 +146,21 @@ globalThis.chrome = {
     local: {
       get: async (key) => (key in store ? { [key]: structuredClone(store[key]) } : {}),
       set: async (obj) => { Object.assign(store, structuredClone(obj)); },
+      remove: async (key) => { delete store[key]; },
     },
   },
-  cookies: { getAll: async () => [] },
   alarms: {
     create: (name, opts) => { seen.alarms[name] = opts; },
     clear: (name, cb) => { delete seen.alarms[name]; cb?.(); },
     onAlarm: event('alarm'),
   },
   runtime: {
+    id: 'this-extension',
     onInstalled: event('installed'),
     onStartup: event('startup'),
     onMessage: event('message'),
     sendMessage: async () => {},
-    getURL: (p) => `chrome-extension://test/${p}`,
+    getURL: (p) => `chrome-extension://this-extension/${p}`,
   },
   action: {
     setBadgeText: ({ text }) => { seen.badge = text; },
@@ -187,6 +189,8 @@ globalThis.chrome = {
   webNavigation: { onCompleted: event('navigation') },
 };
 
+globalThis.indexedDB = createFakeIndexedDB();
+
 await import('../background/service-worker.js');
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -194,7 +198,8 @@ await import('../background/service-worker.js');
 const send = (message, sender = {}) =>
   new Promise((resolve) => listeners.message(message, sender, resolve));
 const refresh = () => send({ type: 'REFRESH' });
-const loginTab = (id) => ({ tab: { id }, url: LOGIN_URL });
+const loginTab = (id, frameId = 0) => ({ id: 'this-extension', tab: { id }, frameId, url: LOGIN_URL });
+const popupPage = { id: 'this-extension', url: 'chrome-extension://this-extension/popup/popup.html' };
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const urgentNotifications = () => seen.notifications.filter(n => n.id.startsWith('urgent-'));
 const loginNotifications = () => seen.notifications.filter(n => n.id === 'login-required');
@@ -321,7 +326,7 @@ await test('remembered SSO but no fingerprint yet → not restored', async () =>
 
 await test('saved credentials → background tab login, submitted exactly once', async () => {
   world.ssoRemembered = false;
-  store.credentials = { username: 'u', password: 'p' };
+  assert.deepEqual(await send({ type: 'SAVE_CREDENTIALS', username: 'u', password: 'p' }, popupPage), { ok: true });
 
   const result = await refresh();
   assert.equal(result.error, 'logging_in');
@@ -331,17 +336,15 @@ await test('saved credentials → background tab login, submitted exactly once',
   assert.equal(tab.active, false);
   assert.ok(seen.alarms.autoLoginTimeout);
 
-  // A login page the user opened themselves is never auto-submitted.
+  const creds = { username: 'u', password: 'p' };
+  // A login page the user opened themselves is filled in but never auto-submitted.
   assert.deepEqual(await send({ type: 'LOGIN_PAGE_READY' }, loginTab(999)),
-    { pending: false, autoSubmit: false });
-  // Messages that do not come from id.tsinghua.edu.cn are ignored.
-  assert.deepEqual(await send({ type: 'LOGIN_PAGE_READY' }, { tab: { id: tab.id }, url: 'https://evil.example/' }),
-    { pending: false, autoSubmit: false });
+    { pending: false, autoSubmit: false, credentials: creds });
 
   assert.deepEqual(await send({ type: 'LOGIN_PAGE_READY' }, loginTab(tab.id)),
-    { pending: true, autoSubmit: true });
+    { pending: true, autoSubmit: true, credentials: creds });
   assert.deepEqual(await send({ type: 'LOGIN_PAGE_READY' }, loginTab(tab.id)),
-    { pending: true, autoSubmit: false });
+    { pending: true, autoSubmit: false, credentials: creds });
 
   // A second refresh while the tab is open must not open another one.
   await refresh();
@@ -414,6 +417,82 @@ await test('auto login switched off → no tab even with credentials', async () 
   const result = await refresh();
   assert.equal(result.error, 'session_expired');
   assert.equal(seen.createdTabs.length, count);
+});
+
+// ─── Credential handling ─────────────────────────────────────────────────────
+
+console.log('\ncredential handling');
+
+await test('saved credentials are encrypted in chrome.storage.local', async () => {
+  assert.equal(store.credentials.v, 2);
+  assert.equal(JSON.stringify(store).includes('"password"'), false);
+  assert.equal(JSON.stringify(store.credentials).includes('"u"'), false);
+});
+
+await test('credentials are handed only to the top frame of the real login page', async () => {
+  const none = { pending: false, autoSubmit: false, credentials: null };
+  const ask = (sender) => send({ type: 'LOGIN_PAGE_READY' }, sender);
+
+  // another site, an iframe on the login page, another page on the same host
+  assert.deepEqual(await ask({ id: 'this-extension', tab: { id: 1 }, frameId: 0, url: 'https://evil.example/do/off/ui/auth/login' }), none);
+  assert.deepEqual(await ask(loginTab(1, 3)), none);
+  assert.deepEqual(await ask({ id: 'this-extension', tab: { id: 1 }, frameId: 0, url: 'https://id.tsinghua.edu.cn/other' }), none);
+  assert.deepEqual(await ask({ id: 'this-extension', tab: { id: 1 }, frameId: 0, url: 'https://learn.tsinghua.edu.cn/f/wlxt/index/course/student/' }), none);
+  // look-alike host
+  assert.deepEqual(await ask({ id: 'this-extension', tab: { id: 1 }, frameId: 0, url: 'https://id.tsinghua.edu.cn.evil.example/do/off/ui/auth/login/x' }), none);
+
+  assert.deepEqual((await ask(loginTab(1))).credentials, { username: 'u', password: 'p' });
+});
+
+await test('the popup learns the username and saved-state, never the password', async () => {
+  const status = await send({ type: 'GET_CREDENTIAL_STATUS' }, popupPage);
+  assert.deepEqual(status, { saved: true, username: 'u' });
+});
+
+await test('content scripts and other extensions cannot read, write or clear credentials', async () => {
+  const contentScript = loginTab(1);
+  const otherExtension = { id: 'another-extension', url: 'chrome-extension://another-extension/page.html' };
+  const lookalike = { id: 'this-extension', tab: { id: 2 }, frameId: 0, url: 'https://evil.example/chrome-extension://this-extension/' };
+  for (const sender of [contentScript, otherExtension, lookalike]) {
+    assert.deepEqual(await send({ type: 'GET_CREDENTIAL_STATUS' }, sender), { saved: false, username: '' });
+    assert.deepEqual(await send({ type: 'SAVE_CREDENTIALS', username: 'x', password: 'y' }, sender), { ok: false });
+    assert.deepEqual(await send({ type: 'CLEAR_CREDENTIALS' }, sender), { ok: false });
+  }
+  assert.deepEqual(await send({ type: 'GET_CREDENTIAL_STATUS' }, popupPage), { saved: true, username: 'u' });
+});
+
+await test('plain-text credentials from an older version are encrypted on install/update', async () => {
+  const encrypted = structuredClone(store.credentials);
+  store.credentials = { username: 'legacy', password: 'legacy-pass' };
+  store.xsrfToken = 'left over from the removed cookie-bridge';
+
+  await listeners.installed({ reason: 'update' });
+  assert.equal(store.credentials.v, 2);
+  assert.equal(JSON.stringify(store).includes('legacy-pass'), false);
+  assert.equal('xsrfToken' in store, false);
+  assert.deepEqual(await send({ type: 'GET_CREDENTIAL_STATUS' }, popupPage), { saved: true, username: 'legacy' });
+
+  await send({ type: 'SAVE_CREDENTIALS', username: 'u', password: 'p' }, popupPage);
+  assert.notDeepEqual(store.credentials, encrypted); // fresh IV
+});
+
+await test('clearing credentials stops background logins', async () => {
+  assert.deepEqual(await send({ type: 'CLEAR_CREDENTIALS' }, popupPage), { ok: true });
+  assert.equal('credentials' in store, false);
+  assert.deepEqual(await send({ type: 'GET_CREDENTIAL_STATUS' }, popupPage), { saved: false, username: '' });
+  assert.equal((await send({ type: 'LOGIN_PAGE_READY' }, loginTab(1))).credentials, null);
+
+  world.loggedIn = false;
+  store.settings = { refreshInterval: 30, notifications: true, autoLogin: true };
+  store.autoLoginState = { pendingTabId: null, submitted: false, lastAttemptAt: 0, failures: 0 };
+  const tabs = seen.createdTabs.length;
+  assert.equal((await refresh()).error, 'session_expired');
+  assert.equal(seen.createdTabs.length, tabs);
+
+  await send({ type: 'SAVE_CREDENTIALS', username: 'u', password: 'p' }, popupPage);
+  world.loggedIn = true;
+  assert.equal((await refresh()).success, true);
+  store.settings = { refreshInterval: 30, notifications: true, autoLogin: false }; // as the next section expects
 });
 
 // ─── Logged-out detection (found on the live site) ───────────────────────────

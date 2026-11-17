@@ -2,7 +2,7 @@
  * Popup script: renders homework list, handles settings and export.
  */
 
-import { getCredentials, saveCredentials, getSettings, saveSettings, clampInterval } from '../lib/storage.js';
+import { getSettings, saveSettings, clampInterval } from '../lib/storage.js';
 import { generateTextList, downloadICS } from '../lib/export.js';
 
 // DOM elements
@@ -190,6 +190,21 @@ function hideStatus() {
   statusBar.classList.add('hidden');
 }
 
+// --- Saved credentials (status only — the popup never sees the password) ---
+
+let savedUsername = '';
+
+async function loadCredentialStatus() {
+  const status = (await chrome.runtime.sendMessage({ type: 'GET_CREDENTIAL_STATUS' }))
+    || { saved: false, username: '' };
+  savedUsername = status.username;
+
+  $('#input-password').placeholder = status.saved ? '已保存（留空则不修改）' : '密码';
+  $('#credential-status').textContent = status.saved ? '账号已加密保存在本机' : '未保存账号';
+  $('#btn-clear-credentials').classList.toggle('hidden', !status.saved);
+  return status;
+}
+
 // --- Event listeners ---
 
 function setupListeners() {
@@ -207,11 +222,11 @@ function setupListeners() {
     settingsPanel.classList.toggle('hidden');
 
     if (isHidden) {
-      // Populate fields
-      const creds = await getCredentials();
-      const settings = await getSettings();
-      $('#input-username').value = creds?.username || '';
-      $('#input-password').value = creds?.password || '';
+      // Populate fields. The saved password is never sent to the popup; the
+      // field stays empty and "leave blank to keep" is the way to not change it.
+      const [status, settings] = await Promise.all([loadCredentialStatus(), getSettings()]);
+      $('#input-username').value = status.username;
+      $('#input-password').value = '';
       $('#input-interval').value = settings.refreshInterval;
       $('#input-notifications').checked = settings.notifications;
       $('#input-autologin').checked = settings.autoLogin;
@@ -226,10 +241,22 @@ function setupListeners() {
     const notifications = $('#input-notifications').checked;
     const autoLogin = $('#input-autologin').checked;
 
-    if (username && password) {
-      await saveCredentials(username, password);
-      chrome.runtime.sendMessage({ type: 'CREDENTIALS_UPDATED' });
+    if (password) {
+      if (!username) {
+        showStatus('请填写用户名', true);
+        return;
+      }
+      const saved = await chrome.runtime.sendMessage({ type: 'SAVE_CREDENTIALS', username, password });
+      if (!saved?.ok) {
+        showStatus('账号保存失败', true);
+        return;
+      }
+    } else if (username !== savedUsername) {
+      // Without the password we cannot re-encrypt under a different username.
+      showStatus(username ? '修改用户名时请同时输入密码' : '如需删除已保存的账号，请点击"清除账号"', true);
+      return;
     }
+    $('#input-password').value = '';
 
     await saveSettings({ refreshInterval: interval, notifications, autoLogin });
     chrome.runtime.sendMessage({ type: 'UPDATE_ALARM', interval });
@@ -241,7 +268,17 @@ function setupListeners() {
 
   // Cancel settings
   $('#btn-cancel-settings').addEventListener('click', () => {
+    $('#input-password').value = '';
     settingsPanel.classList.add('hidden');
+  });
+
+  // Delete the saved credentials
+  $('#btn-clear-credentials').addEventListener('click', async () => {
+    await chrome.runtime.sendMessage({ type: 'CLEAR_CREDENTIALS' });
+    $('#input-password').value = '';
+    $('#input-username').value = (await loadCredentialStatus()).username;
+    showStatus('已清除保存的账号');
+    setTimeout(hideStatus, 2000);
   });
 
   // Copy to clipboard

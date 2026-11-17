@@ -10,7 +10,6 @@ import assert from 'node:assert/strict';
 
 // Minimal chrome mock — only what auth.js touches at module level
 globalThis.chrome = {
-  cookies: { getAll: async () => [] },
   storage: { local: { get: async () => ({}) } },
 };
 globalThis.fetch = async () => ({ ok: false, text: async () => '' });
