@@ -3,15 +3,48 @@
  * Ported from src/models.py.
  */
 
-/**
- * Parse deadline string into a Date object.
- * Handles formats: "YYYY-MM-DD HH:MM:SS", "YYYY-MM-DD HH:MM", "YYYY-MM-DD"
- */
-function parseDeadline(deadlineStr) {
-  if (!deadlineStr) return null;
-  // Replace any dash-formatted date to ensure cross-browser compat
-  const d = new Date(deadlineStr.replace(/-/g, '/'));
+// 网络学堂 always reports wall-clock times in Beijing time (UTC+8, no DST).
+const BEIJING_OFFSET_MS = 8 * 60 * 60 * 1000;
+
+function fromEpoch(n) {
+  if (!Number.isFinite(n) || n <= 0) return null;
+  // Values below 1e11 are seconds, everything else is milliseconds.
+  const d = new Date(n < 1e11 ? n * 1000 : n);
   return isNaN(d.getTime()) ? null : d;
+}
+
+/**
+ * Parse a deadline from the API into a Date.
+ *
+ * Accepts either an epoch timestamp (number or numeric string) or a
+ * "YYYY-MM-DD[ HH:MM[:SS]]" string. Strings are interpreted as Beijing time
+ * regardless of the timezone this machine is in.
+ */
+function parseDeadline(value) {
+  if (value === null || value === undefined || value === '') return null;
+  if (typeof value === 'number') return fromEpoch(value);
+
+  const s = String(value).trim();
+  if (/^\d{10,13}$/.test(s)) return fromEpoch(Number(s));
+
+  const m = s.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+  if (!m) return null;
+
+  const [, y, mo, d, h = '0', mi = '0', sec = '0'] = m;
+  const utcMs = Date.UTC(+y, +mo - 1, +d, +h, +mi, +sec) - BEIJING_OFFSET_MS;
+  const date = new Date(utcMs);
+  return isNaN(date.getTime()) ? null : date;
+}
+
+/**
+ * Format a Date as "YYYY-MM-DD HH:MM" in Beijing time (what 网络学堂 shows).
+ */
+function formatBeijing(date) {
+  if (!date) return '';
+  return new Date(date.getTime() + BEIJING_OFFSET_MS)
+    .toISOString()
+    .slice(0, 16)
+    .replace('T', ' ');
 }
 
 /**
@@ -23,7 +56,7 @@ function isExpired(deadline) {
 }
 
 /**
- * Calculate urgency level (ported from src/models.py:46-72).
+ * Calculate urgency level.
  * 0 = expired, 1 = <24h, 2 = <3d, 3 = <7d, 4 = later, 5 = no deadline
  */
 function urgencyLevel(deadline) {
@@ -38,7 +71,7 @@ function urgencyLevel(deadline) {
 }
 
 /**
- * Format time remaining (ported from src/crawler.py:163-173).
+ * Format time remaining.
  */
 function formatTimeLeft(deadline) {
   if (!deadline) return '';
@@ -59,20 +92,32 @@ function formatTimeLeft(deadline) {
  * Normalize a raw homework item from the API into a consistent shape.
  */
 function normalizeHomework(item, courseName, courseId) {
-  const deadlineStr = item.jzsj || '';
-  const deadline = parseDeadline(deadlineStr);
+  const deadline = parseDeadline(item.jzsj) ?? parseDeadline(item.jzsjStr);
 
   return {
-    id: item.zyid || '',
+    // xszyid is unique per student+homework; zyid is the shared homework id.
+    id: item.xszyid || item.zyid || '',
     title: item.bt || 'Untitled',
     courseName,
     courseId,
     deadline: deadline ? deadline.toISOString() : null,
-    deadlineStr,
+    deadlineStr: formatBeijing(deadline),
     status: 'unsubmitted',
     timeLeft: formatTimeLeft(deadline),
     urgency: urgencyLevel(deadline),
     description: item.sm || '',
+  };
+}
+
+/**
+ * Recompute the time-dependent fields of a cached homework item.
+ */
+function refreshComputedFields(hw) {
+  const deadline = hw.deadline ? new Date(hw.deadline) : null;
+  return {
+    ...hw,
+    timeLeft: formatTimeLeft(deadline),
+    urgency: urgencyLevel(deadline),
   };
 }
 
@@ -93,9 +138,52 @@ function sortHomework(homeworkList) {
   });
 }
 
+/**
+ * Merge a fresh fetch with the previous cache.
+ *
+ * Courses whose request failed keep the items we last saw for them, so a
+ * transient error never makes pending homework disappear from the list.
+ */
+function mergeWithPrevious(freshHomework, previousHomework, failedCourseIds) {
+  if (!failedCourseIds.length || !previousHomework?.length) return sortHomework(freshHomework);
+
+  const failed = new Set(failedCourseIds);
+  const carried = previousHomework
+    .filter(hw => failed.has(hw.courseId))
+    .map(hw => ({ ...refreshComputedFields(hw), stale: true }));
+
+  return sortHomework([...freshHomework, ...carried]);
+}
+
+/**
+ * Stable key for remembering which homework we already notified about.
+ */
+function notificationKey(hw) {
+  return hw.id || `${hw.courseId}:${hw.title}`;
+}
+
+/**
+ * Decide which urgent homework still needs a notification.
+ *
+ * `notified` maps notificationKey -> the deadline we notified for. An item is
+ * notified once; it is notified again only if its deadline changes. Entries
+ * for homework that is no longer urgent are dropped.
+ */
+function selectNewUrgent(homeworkList, notified = {}) {
+  const urgent = homeworkList.filter(hw => hw.urgency === 1);
+  const fresh = urgent.filter(hw => notified[notificationKey(hw)] !== hw.deadline);
+  const next = Object.fromEntries(urgent.map(hw => [notificationKey(hw), hw.deadline]));
+  return { fresh, next };
+}
+
 export {
+  parseDeadline,
+  formatBeijing,
   urgencyLevel,
   formatTimeLeft,
   normalizeHomework,
+  refreshComputedFields,
   sortHomework,
+  mergeWithPrevious,
+  selectNewUrgent,
 };

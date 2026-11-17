@@ -255,6 +255,18 @@ h1 {
   margin-left: 3px;
 }
 
+/* Marks an item carried over from the previous fetch */
+.stale-tag {
+  font-size: var(--font-2xs);
+  font-weight: 500;
+  color: var(--text-tertiary);
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  padding: 0 3px;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
 /* ─── Section divider (expired header) ─── */
 .section-divider {
   font-size: var(--font-xs);

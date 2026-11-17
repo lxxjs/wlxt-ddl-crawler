@@ -16,7 +16,11 @@ globalThis.chrome = {
 globalThis.fetch = async () => ({ ok: false, text: async () => '' });
 
 // Import the named exports we want to test
-import { parseCoursesFromHtml, parseHomeworkResponse } from '../lib/api.js';
+import {
+  parseCoursesFromHtml, parseHomeworkResponse, requireHomeworkRows,
+  parseSemesterResponse, parseCourseListResponse,
+} from '../lib/api.js';
+import { extractCsrfFromHtml, extractTicketFromHtml, isStudentPageUrl } from '../lib/auth.js';
 
 let passed = 0;
 let failed = 0;
@@ -203,6 +207,82 @@ test('realistic full API response', () => {
   assert.equal(rows.length, 1);
   assert.equal(rows[0].zyid, 'abc123');
   assert.equal(rows[0].bt, '第一次作业');
+});
+
+// ─── requireHomeworkRows ─────────────────────────────────────────────────────
+
+console.log('\nrequireHomeworkRows()');
+
+test('valid list (even empty) is returned', () => {
+  assert.deepEqual(requireHomeworkRows({ result: 'success', object: { aaData: [] } }), []);
+  assert.equal(requireHomeworkRows({ aaData: [{ bt: 'x' }] }).length, 1);
+});
+
+test('error payload throws instead of looking like "no homework"', () => {
+  assert.throws(() => requireHomeworkRows({ result: 'error', msg: 'not logged in' }));
+  assert.throws(() => requireHomeworkRows({ object: { total: 0 } }));
+  assert.throws(() => requireHomeworkRows(null));
+});
+
+// ─── parseSemesterResponse / parseCourseListResponse ─────────────────────────
+
+console.log('\nparseSemesterResponse() / parseCourseListResponse()');
+
+test('semester id is read from result.id', () => {
+  const data = { message: 'success', result: { id: '2026-2027-1', xnxq: '2026-2027-1' } };
+  assert.equal(parseSemesterResponse(data), '2026-2027-1');
+});
+
+test('unexpected semester response throws', () => {
+  assert.throws(() => parseSemesterResponse({ message: 'error' }));
+  assert.throws(() => parseSemesterResponse(null));
+});
+
+test('course list maps wlkcid / kcm / jsm', () => {
+  const data = {
+    message: 'success',
+    resultList: [
+      { wlkcid: 'w1', kcm: '高等数学', ywkcm: 'Calculus', jsm: '张伟' },
+      { wlkcid: 'w2', zywkcm: '线性代数' },
+      { kcm: 'no id — skipped' },
+    ],
+  };
+  assert.deepEqual(parseCourseListResponse(data), [
+    { id: 'w1', name: '高等数学', teacher: '张伟' },
+    { id: 'w2', name: '线性代数', teacher: '' },
+  ]);
+});
+
+test('empty resultList is a real "no courses", missing resultList throws', () => {
+  assert.deepEqual(parseCourseListResponse({ resultList: [] }), []);
+  assert.throws(() => parseCourseListResponse({ message: 'error' }));
+});
+
+// ─── auth helpers ────────────────────────────────────────────────────────────
+
+console.log('\nauth helpers');
+
+test('CSRF token from a link query parameter', () => {
+  const html = '<a href="/f/wlxt/kc/v_wlkc_xs_xktjb_coassb/queryxnxq?x=1&_csrf=abc-123">x</a>';
+  assert.equal(extractCsrfFromHtml(html), 'abc-123');
+});
+
+test('CSRF token from a meta tag, and null when absent', () => {
+  assert.equal(extractCsrfFromHtml('<meta name="_csrf" content="tok">'), 'tok');
+  assert.equal(extractCsrfFromHtml('<html></html>'), null);
+});
+
+test('roaming ticket from the post-login page', () => {
+  const html = '<a href="https://learn.tsinghua.edu.cn/f/login.do?status=SUCCESS&amp;ticket=TICKET42">go</a>';
+  assert.equal(extractTicketFromHtml(html), 'TICKET42');
+  assert.equal(extractTicketFromHtml('<p>no link</p>'), null);
+});
+
+test('isStudentPageUrl tells the landing page from a login bounce', () => {
+  assert.equal(isStudentPageUrl('https://learn.tsinghua.edu.cn/f/wlxt/index/course/student/'), true);
+  assert.equal(isStudentPageUrl('https://learn.tsinghua.edu.cn/f/login'), false);
+  assert.equal(isStudentPageUrl('https://id.tsinghua.edu.cn/do/off/ui/auth/login/form/x/0'), false);
+  assert.equal(isStudentPageUrl('https://learn.tsinghua.edu.cn/f/wlxt/index/course/student/?login_timeout=1'), false);
 });
 
 // ─── Summary ─────────────────────────────────────────────────────────────────

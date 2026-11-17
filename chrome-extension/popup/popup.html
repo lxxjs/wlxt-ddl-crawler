@@ -50,7 +50,7 @@
 
     <!-- Footer -->
     <div class="footer">
-      <span id="updated-at">v1.1.0</span>
+      <span id="updated-at"></span>
       <div class="export-actions">
         <button id="btn-copy" class="small-btn" title="复制文字列表">📋 复制</button>
         <button id="btn-ics" class="small-btn" title="导出到Apple提醒事项">📅 导出.ics</button>
@@ -75,6 +75,10 @@
       <label class="checkbox-label">
         <input type="checkbox" id="input-notifications" checked>
         启用通知
+      </label>
+      <label class="checkbox-label" title="会话过期且无法静默恢复时，在后台标签页用已保存的用户名和密码自动登录">
+        <input type="checkbox" id="input-autologin" checked>
+        会话过期时自动登录
       </label>
       <div class="settings-actions">
         <button id="btn-save-settings" class="primary-btn">保存</button>
