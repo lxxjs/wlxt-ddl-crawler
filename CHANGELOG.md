@@ -9,6 +9,7 @@
 - Urgent-deadline notifications fire once per homework instead of on every refresh
 - Concurrent refreshes share one run; refresh interval is clamped to 5–120 minutes
 - Removed the `Referer` request header, which `fetch()` silently drops
+- A session only counts as valid when the student page yields a CSRF token; API requests are never sent with an empty token, and an HTTP 403 from the API is handled as "session expired" (one retry with a fresh token, then ask the user) instead of a generic fetch error
 
 ### Chrome Extension — log in once
 - Keep-alive alarm every 10 minutes

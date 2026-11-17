@@ -47,7 +47,9 @@ These endpoints are used by the Chrome extension (`chrome-extension/lib/api.js`)
 - Unsubmitted homework: `POST /b/wlxt/kczy/zy/student/zyListWj` — DataTable format with `aoData=<JSON array>`
 - Student page: `GET /f/wlxt/index/course/student/` — session probe and `_csrf` source only. The page fills its course list with JavaScript, so scraping it for courses is just a last-resort fallback.
 
-Authentication requires the session cookie plus the CSRF token as the `_csrf` query parameter (also sent as `X-CSRF-Token` / `X-XSRF-TOKEN`). `fetch()` cannot set `Referer`; do not rely on it.
+Authentication requires the session cookie plus the CSRF token as the `_csrf` query parameter (also sent as `X-CSRF-Token` / `X-XSRF-TOKEN`; the API accepts requests with or without those headers). `fetch()` cannot set `Referer`; do not rely on it.
+
+Checked against the live site on 2026-11-17: the token only appears as `_csrf=` in links on the student page — there is no `XSRF-TOKEN` cookie and no `<meta name="_csrf">`. A request with a missing or empty token gets HTTP 403. "Logged in" therefore means "the student page returned a token" (`isSessionValid()`), and a 403 from the API is treated as an expired session (`SessionExpiredError`), not as a generic error.
 
 Endpoints and field names follow [thu-learn-lib](https://github.com/Harry-Chen/thu-learn-lib); check there first when the site changes.
 
