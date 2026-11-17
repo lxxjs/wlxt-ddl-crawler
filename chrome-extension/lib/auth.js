@@ -7,9 +7,12 @@
  *
  * The CSRF token comes from the `_csrf=` links in the student page. On the
  * live site that is the only place it appears (no XSRF-TOKEN cookie, no meta
- * tag), so "the student page gave us a token" is also how we know we are
- * logged in — the same test thu-learn-lib uses. The cookie / storage lookups
- * are kept only as a fallback.
+ * tag). The cookie / storage lookups are kept only as a fallback.
+ *
+ * Whether we are logged in is decided by probeSession(): the student page
+ * must yield a token AND a real API call with that token must be accepted.
+ * The page alone is not proof — after logging out it can still look fine
+ * while every API call is refused.
  *
  * When the 网络学堂 session has expired we try to restore it without the user:
  * id.tsinghua.edu.cn keeps its own longer-lived "remembered" login, and its
@@ -24,6 +27,7 @@ const LOGIN_URL = `${ID_URL}/do/off/ui/auth/login/form/bb5df85216504820be7bba2b0
 const LOGIN_CHECK_SINGLE_URL = `${ID_URL}/do/off/ui/auth/login/checkSingle`;
 const LOGIN_SUCCESS_PATH = '/f/wlxt/index/course/student';
 const STUDENT_PAGE = `${BASE_URL}/f/wlxt/index/course/student/`;
+const SEMESTER_API = `${BASE_URL}/b/kc/zhjw_v_code_xnxq/getCurrentAndNextSemester`;
 const roamUrl = (ticket) => `${BASE_URL}/b/j_spring_security_thauth_roaming_entry?ticket=${ticket}`;
 
 const FINGERPRINT_KEY = 'fingerprint'; // { fingerPrint, fingerGenPrint, fingerGenPrint3 }
@@ -71,37 +75,111 @@ function resetSessionCache() {
 }
 
 /**
- * Check if the user has a valid session by fetching the student page.
- *
- * Logged in means: we ended up on the student page AND it carries a CSRF
- * token. The URL alone is not enough — a logged-out request can still be
- * answered with HTTP 200 on that URL, and without a token every API call
- * would then fail with 403.
+ * Thrown when a request never got an HTTP answer (offline, DNS, timeout).
  */
-async function isSessionValid() {
-  try {
-    const resp = await fetch(STUDENT_PAGE, { credentials: 'include' });
-
-    if (!resp.ok || !isStudentPageUrl(resp.url)) {
-      resetSessionCache();
-      return false;
-    }
-
-    const html = await resp.text();
-    const csrf = extractCsrfFromHtml(html);
-    if (!csrf) {
-      resetSessionCache();
-      return false;
-    }
-
-    cachedStudentHtml = html;
-    cachedCsrf = csrf;
-    cachedCsrfTime = Date.now();
-    return true;
-  } catch (e) {
-    console.warn('isSessionValid fetch failed:', e);
-    return false;
+class NetworkError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'NetworkError';
   }
+}
+
+// Never answer from the HTTP cache, and do not follow redirects blindly: on
+// this site a redirect means "go and log in", and following it can fail in a
+// way that is indistinguishable from being offline.
+const FETCH_DEFAULTS = { credentials: 'include', cache: 'no-store' };
+
+/**
+ * fetch() that reports what kind of answer came back.
+ *
+ * Returns { kind: 'response', resp } for a direct answer,
+ *         { kind: 'redirect' }       when the server redirected us,
+ *         { kind: 'unreachable' }    when there was no answer at all.
+ */
+async function fetchNoFollow(url, init = {}) {
+  try {
+    const resp = await fetch(url, { ...FETCH_DEFAULTS, ...init, redirect: 'manual' });
+    if (resp.type === 'opaqueredirect' || (resp.status >= 300 && resp.status < 400)) {
+      return { kind: 'redirect' };
+    }
+    return { kind: 'response', resp };
+  } catch (e) {
+    return { kind: 'unreachable', error: e };
+  }
+}
+
+/**
+ * Load the student page and cache its CSRF token.
+ * Returns 'ok' | 'expired' | 'unreachable'.
+ */
+async function loadStudentPage() {
+  let result = await fetchNoFollow(STUDENT_PAGE);
+  if (result.kind === 'unreachable') return 'unreachable';
+
+  if (result.kind === 'redirect') {
+    // Normally a bounce to the login page. Follow it once in case the
+    // logged-in page is itself reached through a redirect.
+    try {
+      const resp = await fetch(STUDENT_PAGE, FETCH_DEFAULTS);
+      result = { kind: 'response', resp };
+    } catch {
+      resetSessionCache();
+      return 'expired';
+    }
+  }
+
+  const { resp } = result;
+  if (resp.status >= 500) return 'unreachable'; // server trouble, not a logout
+  if (!resp.ok || !isStudentPageUrl(resp.url)) {
+    resetSessionCache();
+    return 'expired';
+  }
+
+  const html = await resp.text();
+  const csrf = extractCsrfFromHtml(html);
+  if (!csrf) {
+    resetSessionCache();
+    return 'expired';
+  }
+
+  cachedStudentHtml = html;
+  cachedCsrf = csrf;
+  cachedCsrfTime = Date.now();
+  return 'ok';
+}
+
+/**
+ * Find out whether we are logged in.
+ * Returns 'valid' | 'expired' | 'unreachable'.
+ *
+ * 'unreachable' means the site could not be reached at all (offline, server
+ * down) — nothing is known about the session, so nobody should be asked to
+ * log in because of it.
+ */
+async function probeSession() {
+  const page = await loadStudentPage();
+  if (page !== 'ok') return page;
+
+  // The page looked logged in; make sure the API agrees.
+  const ping = await fetchNoFollow(`${SEMESTER_API}?_csrf=${encodeURIComponent(cachedCsrf)}`, {
+    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+  });
+
+  let accepted = false;
+  if (ping.kind === 'response') {
+    if (ping.resp.status >= 500) return 'unreachable';
+    if (ping.resp.ok) {
+      const data = await ping.resp.json().catch(() => null);
+      accepted = !!data?.result;
+    }
+  }
+  // A redirect, a 403, a non-JSON body, or no answer while the page itself
+  // was reachable all mean the API does not consider us logged in.
+  if (!accepted) {
+    resetSessionCache();
+    return 'expired';
+  }
+  return 'valid';
 }
 
 /**
@@ -139,7 +217,9 @@ async function getCsrfToken() {
   }
 
   // 2. Read it from the student page (the source that works on the live site)
-  if (await isSessionValid()) return cachedCsrf;
+  const page = await loadStudentPage();
+  if (page === 'ok') return cachedCsrf;
+  if (page === 'unreachable') throw new NetworkError('Cannot reach 网络学堂');
 
   // 3. Legacy fallback: XSRF-TOKEN cookie, directly or via content/cookie-bridge.js
   const [cookieResult, storageResult] = await Promise.all([
@@ -157,7 +237,7 @@ async function getCsrfToken() {
 }
 
 /**
- * Consume the student page HTML cached by isSessionValid().
+ * Consume the student page HTML cached by loadStudentPage().
  * Returns the HTML once, then clears the cache so it isn't stale.
  */
 function consumeCachedStudentHtml() {
@@ -186,14 +266,14 @@ function extractTicketFromHtml(html) {
  * Try to restore the 网络学堂 session without any user interaction.
  *
  * Returns { ok, reason }. `ok` only means the roaming request went through;
- * callers should re-run isSessionValid() to confirm.
+ * callers should re-run probeSession() to confirm.
  *
  * reason: 'redirected' | 'restored' | 'password_required' | 'no_fingerprint'
  *       | 'two_factor' | 'no_ticket' | 'roam_failed' | 'error'
  */
 async function trySilentLogin() {
   try {
-    const formResp = await fetch(LOGIN_URL, { credentials: 'include' });
+    const formResp = await fetch(LOGIN_URL, FETCH_DEFAULTS);
     const formHtml = await formResp.text();
 
     // SSO sent us straight back to 网络学堂 — nothing more to do.
@@ -212,8 +292,8 @@ async function trySilentLogin() {
     form.append('fingerGenPrint', fp.fingerGenPrint ?? '');
 
     const checkResp = await fetch(LOGIN_CHECK_SINGLE_URL, {
+      ...FETCH_DEFAULTS,
       method: 'POST',
-      credentials: 'include',
       body: form,
     });
     const checkHtml = await checkResp.text();
@@ -223,7 +303,7 @@ async function trySilentLogin() {
     const ticket = extractTicketFromHtml(checkHtml);
     if (!ticket) return { ok: false, reason: 'no_ticket' };
 
-    const roamResp = await fetch(roamUrl(ticket), { credentials: 'include' });
+    const roamResp = await fetch(roamUrl(ticket), FETCH_DEFAULTS);
     if (!roamResp.ok) return { ok: false, reason: 'roam_failed' };
 
     resetSessionCache(); // the new session has a new token
@@ -239,9 +319,12 @@ export {
   LOGIN_URL,
   LOGIN_SUCCESS_PATH,
   STUDENT_PAGE,
+  SEMESTER_API,
   SessionExpiredError,
+  NetworkError,
   resetSessionCache,
-  isSessionValid,
+  fetchNoFollow,
+  probeSession,
   isStudentPageUrl,
   extractCsrfFromHtml,
   extractTicketFromHtml,

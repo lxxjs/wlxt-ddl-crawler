@@ -3,6 +3,11 @@
  * Handles alarm-based refresh, session keep-alive and recovery, message
  * routing, badge updates, and login detection.
  *
+ * probeSession() (lib/auth.js) says whether we are logged in, by asking the
+ * API rather than trusting the student page. "unreachable" (offline, server
+ * down) is kept apart from "expired": only the latter starts a recovery or
+ * asks the user to log in.
+ *
  * Session recovery, in order, whenever 网络学堂 says we are logged out:
  *   1. trySilentLogin()  — password-less SSO re-login via fetch (lib/auth.js)
  *   2. startTabLogin()   — if credentials are saved and auto login is on, open
@@ -15,7 +20,7 @@
  */
 
 import {
-  isSessionValid, trySilentLogin, resetSessionCache, SessionExpiredError,
+  probeSession, trySilentLogin, SessionExpiredError, NetworkError,
   LOGIN_SUCCESS_PATH, LOGIN_URL,
 } from '../lib/auth.js';
 import { getAllHomework } from '../lib/api.js';
@@ -65,17 +70,20 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 // --- Session handling ---
 
 /**
- * Touch the student page so the server-side session does not idle out.
- * If it already expired, a full refresh runs the recovery chain.
+ * Touch the session so it does not idle out on the server.
+ * If it already expired, a full refresh runs the recovery chain. If the
+ * site is unreachable there is nothing to do until the network is back.
  */
 async function keepSessionAlive() {
-  if (await isSessionValid()) {
-    await markSessionOk();
-  } else {
+  if ((await probeSession()) === 'expired') {
     await refreshHomework();
   }
 }
 
+/**
+ * Called after homework was actually fetched: the session works, so clear
+ * the "please log in" state and allow background logins again.
+ */
 async function markSessionOk() {
   const [session, autoLogin] = await Promise.all([getSessionState(), getAutoLoginState()]);
   if (session.loginNotified || session.attentionTabId) {
@@ -89,20 +97,18 @@ async function markSessionOk() {
 
 /**
  * Make sure we have a 网络学堂 session, restoring it if possible.
- * Returns { ok } or { ok: false, pending } where `pending` means a background
- * tab login was started and the refresh will re-run when it completes.
+ * Returns { ok: true },
+ *         { ok: false, offline: true } when the site cannot be reached, or
+ *         { ok: false, pending } where `pending` means a background tab login
+ *         was started and the refresh will re-run when it completes.
  */
 async function ensureSession({ manual = false } = {}) {
-  if (await isSessionValid()) {
-    await markSessionOk();
-    return { ok: true };
-  }
+  const probe = await probeSession();
+  if (probe === 'valid') return { ok: true };
+  if (probe === 'unreachable') return { ok: false, offline: true };
 
   const silent = await trySilentLogin();
-  if (silent.ok && await isSessionValid()) {
-    await markSessionOk();
-    return { ok: true };
-  }
+  if (silent.ok && (await probeSession()) === 'valid') return { ok: true };
   console.log(`Session expired; silent login: ${silent.reason}`);
 
   const pending = await startTabLogin({ manual });
@@ -126,7 +132,9 @@ async function startTabLogin({ manual = false } = {}) {
   if (!settings.autoLogin || !creds?.username || !creds?.password) return false;
   if (await tabExists(state.pendingTabId)) return true;
 
-  // Never hammer the login endpoint: repeated failures can lock the account.
+  // Never hammer the login endpoint: repeated attempts can lock the account.
+  // `failures` counts attempts since homework was last fetched successfully,
+  // so a login that "works" but still leaves the API refusing us cannot loop.
   if (state.failures >= AUTO_LOGIN_MAX_FAILURES) return false;
   if (!manual && Date.now() - state.lastAttemptAt < AUTO_LOGIN_MIN_GAP_MS) return false;
 
@@ -136,6 +144,7 @@ async function startTabLogin({ manual = false } = {}) {
     pendingTabId: tab.id,
     submitted: false,
     lastAttemptAt: Date.now(),
+    failures: state.failures + 1,
   });
   chrome.alarms.create(LOGIN_TIMEOUT_ALARM, { delayInMinutes: AUTO_LOGIN_TIMEOUT_MINUTES });
   return true;
@@ -146,23 +155,12 @@ async function onAutoLoginTimeout() {
   if (state.pendingTabId === null) return;
 
   const tabId = state.pendingTabId;
-  const loggedIn = await isSessionValid();
-
-  await saveAutoLoginState({
-    ...state,
-    pendingTabId: null,
-    submitted: false,
-    failures: loggedIn ? 0 : state.failures + 1,
-  });
+  await saveAutoLoginState({ ...state, pendingTabId: null, submitted: false });
   chrome.tabs.remove(tabId).catch(() => {});
 
-  if (loggedIn) {
-    await refreshHomework();
-  } else {
-    updateBadge('!', RED);
-    await saveRefreshStatus('session_expired');
-    await notifyLoginRequired();
-  }
+  // The login may have gone through without us seeing the navigation event;
+  // a refresh finds out and reports whatever the real state is.
+  await refreshHomework();
 }
 
 /**
@@ -210,27 +208,6 @@ function refreshHomework(options) {
   return inFlightRefresh;
 }
 
-/**
- * Fetch homework; if the API rejects the session even though the student
- * page looked fine, get a fresh token (re-logging in silently if needed)
- * and try exactly once more.
- */
-async function fetchHomeworkWithRetry() {
-  try {
-    return await getAllHomework();
-  } catch (e) {
-    if (!(e instanceof SessionExpiredError)) throw e;
-    console.warn('API rejected the session, retrying with a fresh token:', e.message);
-
-    resetSessionCache();
-    if (!(await isSessionValid())) {
-      await trySilentLogin();
-      if (!(await isSessionValid())) throw e;
-    }
-    return await getAllHomework();
-  }
-}
-
 async function reportSessionExpired(pending) {
   const error = pending ? 'logging_in' : 'session_expired';
   updateBadge('!', RED);
@@ -239,14 +216,25 @@ async function reportSessionExpired(pending) {
   return { success: false, error };
 }
 
+/**
+ * The site could not be reached. That says nothing about the session, so
+ * the badge and cache stay as they are and nobody is asked to log in.
+ */
+async function reportOffline() {
+  await saveRefreshStatus('network');
+  return { success: false, error: 'network' };
+}
+
 async function doRefresh({ manual = false } = {}) {
   try {
     const session = await ensureSession({ manual });
-    if (!session.ok) return await reportSessionExpired(session.pending);
+    if (!session.ok) {
+      return session.offline ? await reportOffline() : await reportSessionExpired(session.pending);
+    }
 
-    // Session is valid and CSRF token is now cached by isSessionValid()
+    // The probe just confirmed the session and cached a fresh CSRF token.
     const previous = await getHomeworkCache();
-    const { homework, failedCourses } = await fetchHomeworkWithRetry();
+    const { homework, failedCourses } = await getAllHomework();
 
     // Courses that failed keep what we last knew about them.
     const merged = mergeWithPrevious(homework, previous?.homework, failedCourses.map(c => c.id));
@@ -254,6 +242,7 @@ async function doRefresh({ manual = false } = {}) {
 
     await saveHomeworkCache(merged, failedNames);
     await saveRefreshStatus(null);
+    await markSessionOk();
     updateBadgeFromHomework(merged);
     await checkUrgentNotifications(merged);
 
@@ -261,10 +250,14 @@ async function doRefresh({ manual = false } = {}) {
   } catch (e) {
     // Keep the previous cache: a failed refresh must not look like "no homework".
     if (e instanceof SessionExpiredError) {
-      // Still rejected after a fresh token. Ask the user rather than opening
-      // login tabs in a loop: a tab login would "succeed" and land here again.
+      // The session ended between the probe and the fetch. The next refresh
+      // (or the keep-alive) runs the recovery chain.
       console.warn('Session rejected by the API:', e.message);
       return await reportSessionExpired(false).catch(() => ({ success: false, error: 'session_expired' }));
+    }
+    if (e instanceof NetworkError) {
+      console.warn('Network error during refresh:', e.message);
+      return await reportOffline().catch(() => ({ success: false, error: 'network' }));
     }
     console.error('Refresh failed:', e);
     updateBadge('!', RED);
@@ -357,7 +350,7 @@ chrome.webNavigation.onCompleted.addListener(async (details) => {
   const state = await getAutoLoginState();
   const wasAutoLogin = state.pendingTabId === details.tabId;
   if (wasAutoLogin) {
-    await saveAutoLoginState({ ...state, pendingTabId: null, submitted: false, failures: 0 });
+    await saveAutoLoginState({ ...state, pendingTabId: null, submitted: false });
     chrome.alarms.clear(LOGIN_TIMEOUT_ALARM);
   }
 

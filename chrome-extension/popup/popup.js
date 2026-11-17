@@ -34,6 +34,8 @@ function formatUpdatedAt(timestamp) {
 function showFetchWarnings({ lastError, failedCourses }) {
   if (lastError === 'logging_in') {
     showStatus('会话已过期，正在后台自动登录…');
+  } else if (lastError === 'network') {
+    showStatus('无法连接网络学堂 — 以下为上次获取的数据', true);
   } else if (lastError === 'session_expired') {
     loginPrompt.classList.remove('hidden');
     showStatus('会话已过期 — 以下为上次获取的数据', true);
@@ -87,6 +89,8 @@ async function doRefresh() {
     showFetchWarnings(result);
   } else if (result?.error === 'logging_in') {
     showStatus('会话已过期，正在后台自动登录…');
+  } else if (result?.error === 'network') {
+    showStatus('无法连接网络学堂，请检查网络后重试', true);
   } else if (result?.error === 'session_expired') {
     loginPrompt.classList.remove('hidden');
     showStatus('会话已过期 — 请登录网络学堂，登录后会自动刷新', true);

@@ -49,7 +49,9 @@ These endpoints are used by the Chrome extension (`chrome-extension/lib/api.js`)
 
 Authentication requires the session cookie plus the CSRF token as the `_csrf` query parameter (also sent as `X-CSRF-Token` / `X-XSRF-TOKEN`; the API accepts requests with or without those headers). `fetch()` cannot set `Referer`; do not rely on it.
 
-Checked against the live site on 2026-11-17: the token only appears as `_csrf=` in links on the student page — there is no `XSRF-TOKEN` cookie and no `<meta name="_csrf">`. A request with a missing or empty token gets HTTP 403. "Logged in" therefore means "the student page returned a token" (`isSessionValid()`), and a 403 from the API is treated as an expired session (`SessionExpiredError`), not as a generic error.
+Checked against the live site on 2026-11-17: the token only appears as `_csrf=` in links on the student page — there is no `XSRF-TOKEN` cookie and no `<meta name="_csrf">`. A request with a missing or empty token gets HTTP 403. After logging out, the student page can still look logged in while API calls fail (seen as `Failed to fetch`: a redirect to login that cannot be followed).
+
+So `probeSession()` (`lib/auth.js`) decides whether we are logged in: the student page must yield a token **and** a real API call with it must be accepted. It returns `valid`, `expired`, or `unreachable`. All requests use `cache: 'no-store'` and `redirect: 'manual'`; from the API a redirect or a 403 means logged out (`SessionExpiredError`), no answer at all means `NetworkError`. Keep those two apart: `unreachable` / `NetworkError` must never trigger a login prompt, a login tab, or a badge change.
 
 Endpoints and field names follow [thu-learn-lib](https://github.com/Harry-Chen/thu-learn-lib); check there first when the site changes.
 
@@ -58,7 +60,8 @@ Endpoints and field names follow [thu-learn-lib](https://github.com/Harry-Chen/t
 - **A failed fetch must never look like "no homework".** `getAllHomework()` throws when the course list or every course fails, and reports partially failed courses; the service worker then keeps the previous cache (items of failed courses are marked `stale`).
 - **Deadlines are Beijing time.** `parseDeadline()` accepts epoch timestamps or `YYYY-MM-DD HH:MM[:SS]` strings and never uses the machine's timezone. `src/models.py` uses `BEIJING_TZ` for the same reason.
 - **Notifications are sent once per homework** (`selectNewUrgent()`), and the "please log in" notification once per expiry.
-- **Session recovery** (`ensureSession()` in the service worker), in order: silent SSO re-login via `checkSingle` using the fingerprint recorded by `content/autofill.js` → background-tab login with saved credentials (opt-out in settings, submitted at most once per attempt, stops after a wrong password / 2FA / captcha) → ask the user. A keep-alive alarm touches the session every 10 minutes.
+- **Offline is not logged out.** When the site cannot be reached the popup says so and keeps the cached list; nothing else changes.
+- **Session recovery** (`ensureSession()` in the service worker), in order: silent SSO re-login via `checkSingle` using the fingerprint recorded by `content/autofill.js` → background-tab login with saved credentials (opt-out in settings, submitted at most once per attempt, stops after a wrong password / 2FA / captcha) → ask the user. A keep-alive alarm probes the session every 10 minutes. Background-tab logins are limited to 2 attempts since the last successful homework fetch.
 
 ## Tests
 

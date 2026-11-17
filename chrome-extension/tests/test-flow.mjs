@@ -23,7 +23,10 @@ const world = {
   loggedIn: true,
   ssoRemembered: false,
   courseApiBroken: false,
-  loggedOutPageIs200: false, // logged-out student page answers 200 without a token
+  offline: false,
+  loggedOutPageIs200: false,     // logged-out student page answers 200 without a token
+  loggedOutPageLooksFine: false, // logged-out student page still carries a (useless) token
+  loginRedirectFails: false,     // following the redirect to the login page throws
   apiRejections: 0,          // number of upcoming API calls to answer with 403
   failingCourses: new Set(),
   courses: [
@@ -40,65 +43,92 @@ const world = {
 const respond = (url, body, status = 200) => ({
   ok: status >= 200 && status < 300,
   status,
+  type: 'basic',
   url,
   text: async () => (typeof body === 'string' ? body : JSON.stringify(body)),
   json: async () => (typeof body === 'string' ? JSON.parse(body) : body),
 });
+const page = (body, status = 200) => ({ body, status });
+const redirect = (to) => ({ redirect: to });
 
-const loginPage = () =>
-  respond(LOGIN_URL, world.ssoRemembered
+const loginForm = () =>
+  page(world.ssoRemembered
     ? '<form action="/do/off/ui/auth/login/checkSingle"><input id="fingerPrint"></form>'
     : '<form id="theform"><input id="i_user"><input id="i_pass"></form>');
 
-globalThis.fetch = async (input, init = {}) => {
-  const url = String(input);
+/** One request → { body, status } or { redirect }. */
+function route(url, init) {
   const path = url.split('?')[0];
-  world.requests.push(`${init.method || 'GET'} ${path}`);
 
   if (path === STUDENT_PAGE) {
-    if (world.loggedIn) return respond(STUDENT_PAGE, '<a href="/f/wlxt/x?a=1&_csrf=TOKEN-1">课程</a>');
-    return world.loggedOutPageIs200 ? respond(STUDENT_PAGE, '<html>请登录</html>') : loginPage();
+    if (world.loggedIn) return page('<a href="/f/wlxt/x?a=1&_csrf=TOKEN-1">课程</a>');
+    if (world.loggedOutPageIs200) return page('<html>请登录</html>');
+    // Worst case seen after logging out: the page still looks logged in.
+    if (world.loggedOutPageLooksFine) return page('<a href="/f/wlxt/x?a=1&_csrf=STALE">课程</a>');
+    return redirect(LOGIN_URL);
   }
-  if (path === LOGIN_URL) return loginPage();
+  if (path === LOGIN_URL) return loginForm();
+  if (path === `${LEARN}/f/login`) return page('<html>login</html>');
 
   if (path === `${ID}/do/off/ui/auth/login/checkSingle`) {
     assert.equal(init.method, 'POST');
     assert.equal(init.body.get('fingerPrint'), 'FP-1');
-    return respond(url, `<a href="${LEARN}/f/login.do?status=SUCCESS&ticket=TICKET-1">continue</a>`);
+    return page(`<a href="${LEARN}/f/login.do?status=SUCCESS&ticket=TICKET-1">continue</a>`);
   }
   if (path === `${LEARN}/b/j_spring_security_thauth_roaming_entry`) {
     assert.ok(url.endsWith('ticket=TICKET-1'));
     world.loggedIn = true;
-    return respond(STUDENT_PAGE, 'ok');
+    return redirect(STUDENT_PAGE);
   }
 
-  // Everything below is the JSON API. Logged-out users get a 403 or the login page.
+  // Everything below is the JSON API. Logged-out users get a 403 or a redirect to login.
   if (world.apiRejections > 0) {
     world.apiRejections -= 1;
-    return respond(url, 'Forbidden', 403);
+    return page('Forbidden', 403);
   }
   if (!world.loggedIn) {
-    return world.loggedOutPageIs200
-      ? respond(url, 'Forbidden', 403)
-      : respond(`${LEARN}/f/login?login_timeout=1`, '<html>login</html>');
+    return world.loggedOutPageIs200 ? page('Forbidden', 403) : redirect(`${LEARN}/f/login?login_timeout=1`);
   }
   assert.ok(url.includes('_csrf=TOKEN-1'), `CSRF token missing on ${url}`);
 
   if (path.endsWith('/getCurrentAndNextSemester')) {
-    return respond(url, { message: 'success', result: { id: '2026-2027-1' } });
+    return page({ message: 'success', result: { id: '2026-2027-1' } });
   }
   if (path.includes('/loadCourseBySemesterId/2026-2027-1/')) {
     return world.courseApiBroken
-      ? respond(url, '<html>maintenance</html>')
-      : respond(url, { message: 'success', resultList: world.courses });
+      ? page('<html>maintenance</html>')
+      : page({ message: 'success', resultList: world.courses });
   }
   if (path.endsWith('/zyListWj')) {
     const aoData = JSON.parse(new URLSearchParams(init.body).get('aoData'));
     const courseId = aoData.find(p => p.name === 'wlkcid').value;
-    if (world.failingCourses.has(courseId)) return respond(url, 'boom', 500);
-    return respond(url, { result: 'success', object: { aaData: world.homework[courseId] ?? [] } });
+    if (world.failingCourses.has(courseId)) return page('boom', 500);
+    return page({ result: 'success', object: { aaData: world.homework[courseId] ?? [] } });
   }
   throw new Error(`fake server: unexpected request ${url}`);
+}
+
+/** fetch() with real redirect semantics: 'manual' yields an opaque redirect. */
+globalThis.fetch = async (input, init = {}) => {
+  if (world.offline) throw new TypeError('Failed to fetch');
+  assert.equal(init.cache, 'no-store', `request must bypass the HTTP cache: ${input}`);
+
+  let url = String(input);
+  let hopInit = init;
+  for (let hop = 0; hop < 5; hop++) {
+    world.requests.push(`${hopInit.method || 'GET'} ${url.split('?')[0]}`);
+    const result = route(url, hopInit);
+    if (!result.redirect) return respond(url, result.body, result.status);
+
+    if (init.redirect === 'manual') {
+      return { ok: false, status: 0, type: 'opaqueredirect', url: '', text: async () => '' };
+    }
+    // What the live site did after a logout: the login redirect cannot be followed.
+    if (world.loginRedirectFails) throw new TypeError('Failed to fetch');
+    url = result.redirect;
+    hopInit = {};
+  }
+  throw new TypeError('too many redirects');
 };
 
 // ─── Fake chrome ─────────────────────────────────────────────────────────────
@@ -403,26 +433,83 @@ await test('student page answering 200 without a token is NOT a session', async 
   world.loggedOutPageIs200 = false;
 });
 
-await test('API answering 403 once is retried with a fresh token', async () => {
-  world.loggedIn = true;
-  world.apiRejections = 1;
+await test('page still looks logged in but the API refuses us → treated as logged out', async () => {
+  // Reproduces "获取失败: Failed to fetch" seen right after logging out.
+  world.loggedIn = false;
+  world.loggedOutPageLooksFine = true;
+  world.loginRedirectFails = true;
+  store.settings = { refreshInterval: 30, notifications: true, autoLogin: false };
+
   const result = await refresh();
-  assert.equal(result.success, true);
-  assert.equal(result.homework.length, 2);
+  assert.equal(result.error, 'session_expired'); // not "Failed to fetch"
+  assert.equal(store.refreshStatus.lastError, 'session_expired');
+  assert.equal(store.homeworkCache.homework.length, 2);
+  assert.equal(seen.badge, '!');
 });
 
-await test('API answering 403 persistently → ask the user, no login-tab loop', async () => {
+await test('…and is restored silently when id.tsinghua still remembers the browser', async () => {
+  world.ssoRemembered = true;
+  world.loginRedirectFails = false;
+  store.fingerprint = { fingerPrint: 'FP-1', fingerGenPrint: 'G-1', fingerGenPrint3: '' };
+
+  const result = await refresh();
+  assert.equal(result.success, true);
+  assert.equal(world.loggedIn, true);
+  assert.equal(seen.badge, '1');
+  world.loggedOutPageLooksFine = false;
+  world.ssoRemembered = false;
+});
+
+await test('API answering 403 while the page looks fine → logged out, no login-tab loop', async () => {
   store.settings = { refreshInterval: 30, notifications: true, autoLogin: true };
   store.autoLoginState = { pendingTabId: null, submitted: false, lastAttemptAt: 0, failures: 0 };
   world.apiRejections = Infinity;
   const tabs = seen.createdTabs.length;
 
-  const result = await refresh();
-  assert.equal(result.error, 'session_expired');
-  assert.equal(seen.createdTabs.length, tabs);
+  // Each attempt opens at most one tab; a "successful" login that still
+  // leaves the API refusing us must not reset the attempt counter.
+  for (let i = 0; i < 4; i++) {
+    const result = await refresh();
+    assert.equal(result.success, false);
+    const pending = store.autoLoginState.pendingTabId;
+    if (pending !== null) {
+      await listeners.navigation({ frameId: 0, tabId: pending, url: STUDENT_PAGE });
+      await sleep(2100);
+    }
+    store.autoLoginState.lastAttemptAt = 0; // skip the 10-minute gap
+  }
+  assert.equal(seen.createdTabs.length - tabs, 2); // AUTO_LOGIN_MAX_FAILURES
   assert.equal(store.homeworkCache.homework.length, 2);
-  assert.equal(seen.badge, '!');
   world.apiRejections = 0;
+
+  const ok = await refresh();
+  assert.equal(ok.success, true);
+  assert.equal(store.autoLoginState.failures, 0); // real success re-enables it
+});
+
+// ─── Offline ─────────────────────────────────────────────────────────────────
+
+console.log('\noffline');
+
+await test('no network → "network" status, badge and cache untouched, no login prompt', async () => {
+  world.offline = true;
+  const notified = loginNotifications().length;
+  const tabs = seen.createdTabs.length;
+  const cache = structuredClone(store.homeworkCache);
+
+  const result = await refresh();
+  assert.equal(result.error, 'network');
+  await listeners.alarm({ name: 'keepSessionAlive' });
+  await listeners.alarm({ name: 'refreshHomework' });
+
+  assert.equal(seen.badge, '1');
+  assert.deepEqual(store.homeworkCache, cache);
+  assert.equal(loginNotifications().length, notified);
+  assert.equal(seen.createdTabs.length, tabs);
+  assert.equal((await send({ type: 'GET_HOMEWORK' })).lastError, 'network');
+
+  world.offline = false;
+  assert.equal((await refresh()).success, true);
 });
 
 // ─── Summary ─────────────────────────────────────────────────────────────────
