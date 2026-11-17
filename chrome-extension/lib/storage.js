@@ -2,8 +2,8 @@
  * Typed wrappers for chrome.storage.local.
  */
 
+// Saved login credentials are NOT handled here: see lib/credentials.js.
 const KEYS = {
-  CREDENTIALS: 'credentials',       // { username, password }
   HOMEWORK_CACHE: 'homeworkCache',   // { updatedAt, homework: [...], failedCourses: [name] }
   SETTINGS: 'settings',             // { refreshInterval, notifications, autoLogin }
   REFRESH_STATUS: 'refreshStatus',   // { lastAttemptAt, lastError }
@@ -22,14 +22,6 @@ async function get(key) {
 
 async function set(key, value) {
   await chrome.storage.local.set({ [key]: value });
-}
-
-async function getCredentials() {
-  return await get(KEYS.CREDENTIALS);
-}
-
-async function saveCredentials(username, password) {
-  await set(KEYS.CREDENTIALS, { username, password });
 }
 
 async function getHomeworkCache() {
@@ -109,8 +101,6 @@ async function saveAutoLoginState(state) {
 }
 
 export {
-  getCredentials,
-  saveCredentials,
   getHomeworkCache,
   saveHomeworkCache,
   clampInterval,

@@ -66,8 +66,12 @@
       </label>
       <label>
         密码
-        <input type="password" id="input-password" placeholder="密码">
+        <input type="password" id="input-password" placeholder="密码" autocomplete="off">
       </label>
+      <div class="credential-row">
+        <span id="credential-status" class="credential-status"></span>
+        <button id="btn-clear-credentials" class="small-btn hidden" type="button">清除账号</button>
+      </div>
       <label>
         刷新间隔 (分钟)
         <input type="number" id="input-interval" min="5" max="120" value="30">

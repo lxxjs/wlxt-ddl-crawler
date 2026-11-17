@@ -3,11 +3,11 @@
  *
  * Key insight: In Manifest V3, fetch() from the service worker with
  * credentials:'include' automatically sends cookies when we have host_permissions.
- * We do NOT need chrome.cookies.getAll to make authenticated requests.
+ * No `cookies` permission is needed to make authenticated requests.
  *
  * The CSRF token comes from the `_csrf=` links in the student page. On the
  * live site that is the only place it appears (no XSRF-TOKEN cookie, no meta
- * tag). The cookie / storage lookups are kept only as a fallback.
+ * tag), so the extension does not need the `cookies` permission at all.
  *
  * Whether we are logged in is decided by probeSession(): the student page
  * must yield a token AND a real API call with that token must be accepted.
@@ -220,18 +220,6 @@ async function getCsrfToken() {
   const page = await loadStudentPage();
   if (page === 'ok') return cachedCsrf;
   if (page === 'unreachable') throw new NetworkError('Cannot reach 网络学堂');
-
-  // 3. Legacy fallback: XSRF-TOKEN cookie, directly or via content/cookie-bridge.js
-  const [cookieResult, storageResult] = await Promise.all([
-    chrome.cookies.getAll({ url: 'https://learn.tsinghua.edu.cn/' }).catch(() => []),
-    chrome.storage.local.get('xsrfToken').catch(() => ({})),
-  ]);
-  const fallback = cookieResult.find(c => c.name === 'XSRF-TOKEN')?.value || storageResult.xsrfToken;
-  if (fallback) {
-    cachedCsrf = fallback;
-    cachedCsrfTime = Date.now();
-    return cachedCsrf;
-  }
 
   throw new SessionExpiredError('No CSRF token available (not logged in)');
 }

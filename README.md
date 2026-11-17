@@ -43,9 +43,9 @@ wlxt-ddl-crawler/
 └── chrome-extension/              # Chrome extension (badge + notifications)
     ├── manifest.json
     ├── background/service-worker.js
-    ├── lib/                       # auth, api, models, storage, export
+    ├── lib/                       # auth, api, credentials, models, storage, export
     ├── popup/                     # Extension popup UI
-    └── content/                   # Autofill + cookie-bridge scripts
+    └── content/                   # Login-page script (fingerprint capture, autofill)
 ```
 
 ## Chrome Extension
@@ -64,7 +64,7 @@ Log in to 网络学堂 once in the same Chrome profile. After that the extension
 
 1. A keep-alive request every 10 minutes stops the session from idling out.
 2. If the session still expires (for example after restarting Chrome), it is restored silently through the login that `id.tsinghua.edu.cn` remembers for this browser. No password is involved.
-3. If that is not possible and you saved your username and password in the extension settings, the login page is opened in a background tab, filled in, submitted once, and closed again. Turn this off with **会话过期时自动登录**. Saved credentials live unencrypted in `chrome.storage.local`.
+3. If that is not possible and you saved your username and password in the extension settings, the login page is opened in a background tab, filled in, submitted once, and closed again. Turn this off with **会话过期时自动登录**. Saved credentials are encrypted (AES-GCM, key held by the browser and not exportable) and can be deleted with **清除账号**; the settings panel never shows the saved password again. This keeps the password out of plain-text storage and backups, but it is not a defence against software running under your own Chrome profile.
 4. Only when a step needs you (二次认证, captcha, wrong password) do you get a notification; click it to finish logging in.
 
 While logged out, or when some courses fail to load, the popup keeps showing the last known homework and says so, instead of showing an empty list.
@@ -72,6 +72,7 @@ While logged out, or when some courses fail to load, the popup keeps showing the
 ### Tests
 
 ```bash
+node chrome-extension/tests/test-credentials.mjs
 node chrome-extension/tests/test-models.mjs
 node chrome-extension/tests/test-parsing.mjs
 node chrome-extension/tests/test-flow.mjs

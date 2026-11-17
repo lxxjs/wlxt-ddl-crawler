@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.3.0] — 2026-11-17
+
+### Chrome Extension — security
+- Saved credentials are encrypted at rest (AES-GCM, non-extractable key in IndexedDB). Credentials saved by earlier versions as plain text are encrypted automatically on update
+- Only the service worker can read them. The login-page script gets them by message, and only as the top frame of the id.tsinghua.edu.cn login page; the popup can only learn whether an account is saved and its username
+- The settings panel no longer fills the saved password back in (leave the field blank to keep it); added **清除账号** to delete the saved account
+- Permissions reduced to `storage`, `alarms`, `webNavigation`, `notifications`; host access reduced from `*.tsinghua.edu.cn` to `learn` and `id`. Removed `cookies`, `tabs`, `scripting`
+- Removed `content/cookie-bridge.js` and the `XSRF-TOKEN` cookie fallback: the live site has no such cookie
+- The login-page content script now only runs on `/do/off/ui/auth/login/*`
+
 ## [1.2.1] — 2026-11-17
 
 ### Chrome Extension
