@@ -9,7 +9,9 @@
  * could be fetched at all.
  */
 
-import { getCsrfToken, BASE_URL, STUDENT_PAGE, consumeCachedStudentHtml } from './auth.js';
+import {
+  getCsrfToken, BASE_URL, STUDENT_PAGE, consumeCachedStudentHtml, SessionExpiredError,
+} from './auth.js';
 import { normalizeHomework, sortHomework } from './models.js';
 
 const SEMESTER_API = `${BASE_URL}/b/kc/zhjw_v_code_xnxq/getCurrentAndNextSemester`;
@@ -21,8 +23,9 @@ const CONCURRENCY = 3;
 
 /**
  * Fetch a JSON endpoint with the session cookie and CSRF token.
- * Throws on HTTP errors, on being bounced to a login page, and on non-JSON
- * bodies (an expired session answers with an HTML login page).
+ * Throws SessionExpiredError when the server treats us as logged out (HTTP
+ * 403 or a bounce to a login page), and a plain Error on other HTTP errors
+ * and non-JSON bodies.
  */
 async function fetchJson(url, init = {}) {
   const csrf = await getCsrfToken();
@@ -39,8 +42,10 @@ async function fetchJson(url, init = {}) {
     },
   });
 
+  if (resp.status === 403 || resp.url.includes('login')) {
+    throw new SessionExpiredError(`Session rejected (HTTP ${resp.status}) by ${url}`);
+  }
   if (!resp.ok) throw new Error(`HTTP ${resp.status} from ${url}`);
-  if (resp.url.includes('login')) throw new Error(`Session expired (redirected to login) for ${url}`);
 
   const text = await resp.text();
   try {
@@ -82,7 +87,7 @@ function dtPost(url, extraParams = []) {
  * Exported for testing.
  */
 export function parseSemesterResponse(data) {
-  const id = data?.result?.id;
+  const id = data?.result?.id || data?.result?.xnxq;
   if (typeof id !== 'string' || !id) {
     throw new Error('Unexpected semester response');
   }
@@ -160,6 +165,7 @@ async function getCourses() {
     const semesterId = parseSemesterResponse(await fetchJson(SEMESTER_API));
     return parseCourseListResponse(await fetchJson(courseListApi(semesterId)));
   } catch (apiError) {
+    if (apiError instanceof SessionExpiredError) throw apiError;
     console.warn('[api] course API failed, trying student page HTML:', apiError);
 
     let html = consumeCachedStudentHtml();
@@ -234,13 +240,17 @@ async function getAllHomework() {
           id: course.id,
           name: course.name,
           error: result.reason?.message || String(result.reason),
+          sessionExpired: result.reason instanceof SessionExpiredError,
         });
       }
     });
   }
 
   if (courses.length && failedCourses.length === courses.length) {
-    throw new Error(`All ${courses.length} course requests failed: ${failedCourses[0].error}`);
+    const message = `All ${courses.length} course requests failed: ${failedCourses[0].error}`;
+    throw failedCourses.every(c => c.sessionExpired)
+      ? new SessionExpiredError(message)
+      : new Error(message);
   }
 
   return {

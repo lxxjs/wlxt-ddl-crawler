@@ -5,10 +5,11 @@
  * credentials:'include' automatically sends cookies when we have host_permissions.
  * We do NOT need chrome.cookies.getAll to make authenticated requests.
  *
- * For the CSRF token (needed in headers), we:
- * 1. Try chrome.cookies.getAll (may work)
- * 2. Try reading from a content script via chrome.storage.local
- * 3. Fetch the student page and parse _csrf from the HTML (most reliable fallback)
+ * The CSRF token comes from the `_csrf=` links in the student page. On the
+ * live site that is the only place it appears (no XSRF-TOKEN cookie, no meta
+ * tag), so "the student page gave us a token" is also how we know we are
+ * logged in — the same test thu-learn-lib uses. The cookie / storage lookups
+ * are kept only as a fallback.
  *
  * When the 网络学堂 session has expired we try to restore it without the user:
  * id.tsinghua.edu.cn keeps its own longer-lived "remembered" login, and its
@@ -50,28 +51,52 @@ function isStudentPageUrl(url) {
 }
 
 /**
+ * Thrown when 网络学堂 answers like we are not logged in (HTTP 403, a bounce
+ * to a login page, or no CSRF token to send).
+ */
+class SessionExpiredError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'SessionExpiredError';
+  }
+}
+
+/**
+ * Forget the cached token and page, e.g. after the API rejected the token.
+ */
+function resetSessionCache() {
+  cachedCsrf = null;
+  cachedCsrfTime = 0;
+  cachedStudentHtml = null;
+}
+
+/**
  * Check if the user has a valid session by fetching the student page.
- * A logged-out session gets redirected away (to login), so we follow the
- * redirect and look at where we ended up.
- * If successful, also extracts and caches the CSRF token from the page.
+ *
+ * Logged in means: we ended up on the student page AND it carries a CSRF
+ * token. The URL alone is not enough — a logged-out request can still be
+ * answered with HTTP 200 on that URL, and without a token every API call
+ * would then fail with 403.
  */
 async function isSessionValid() {
   try {
     const resp = await fetch(STUDENT_PAGE, { credentials: 'include' });
 
     if (!resp.ok || !isStudentPageUrl(resp.url)) {
-      cachedCsrf = null;
-      cachedStudentHtml = null;
+      resetSessionCache();
       return false;
     }
 
     const html = await resp.text();
-    cachedStudentHtml = html;
     const csrf = extractCsrfFromHtml(html);
-    if (csrf) {
-      cachedCsrf = csrf;
-      cachedCsrfTime = Date.now();
+    if (!csrf) {
+      resetSessionCache();
+      return false;
     }
+
+    cachedStudentHtml = html;
+    cachedCsrf = csrf;
+    cachedCsrfTime = Date.now();
     return true;
   } catch (e) {
     console.warn('isSessionValid fetch failed:', e);
@@ -104,7 +129,8 @@ function extractCsrfFromHtml(html) {
 }
 
 /**
- * Get CSRF token using multiple strategies.
+ * Get the CSRF token. Never returns an empty token: a request without one
+ * is rejected with 403, so we fail early with SessionExpiredError instead.
  */
 async function getCsrfToken() {
   // 1. Return cached if fresh
@@ -112,42 +138,22 @@ async function getCsrfToken() {
     return cachedCsrf;
   }
 
-  // 2. Try chrome.cookies and chrome.storage in parallel
+  // 2. Read it from the student page (the source that works on the live site)
+  if (await isSessionValid()) return cachedCsrf;
+
+  // 3. Legacy fallback: XSRF-TOKEN cookie, directly or via content/cookie-bridge.js
   const [cookieResult, storageResult] = await Promise.all([
     chrome.cookies.getAll({ url: 'https://learn.tsinghua.edu.cn/' }).catch(() => []),
     chrome.storage.local.get('xsrfToken').catch(() => ({})),
   ]);
-
-  const xsrf = cookieResult.find(c => c.name === 'XSRF-TOKEN');
-  if (xsrf) {
-    cachedCsrf = xsrf.value;
+  const fallback = cookieResult.find(c => c.name === 'XSRF-TOKEN')?.value || storageResult.xsrfToken;
+  if (fallback) {
+    cachedCsrf = fallback;
     cachedCsrfTime = Date.now();
     return cachedCsrf;
   }
 
-  if (storageResult.xsrfToken) {
-    cachedCsrf = storageResult.xsrfToken;
-    cachedCsrfTime = Date.now();
-    return cachedCsrf;
-  }
-
-  // 3. Fetch student page to extract _csrf (fallback for edge cases)
-  try {
-    const resp = await fetch(STUDENT_PAGE, { credentials: 'include' });
-    if (resp.ok) {
-      const html = await resp.text();
-      const csrf = extractCsrfFromHtml(html);
-      if (csrf) {
-        cachedCsrf = csrf;
-        cachedCsrfTime = Date.now();
-        return cachedCsrf;
-      }
-    }
-  } catch (e) {
-    console.warn('CSRF fetch failed:', e);
-  }
-
-  return '';
+  throw new SessionExpiredError('No CSRF token available (not logged in)');
 }
 
 /**
@@ -220,7 +226,7 @@ async function trySilentLogin() {
     const roamResp = await fetch(roamUrl(ticket), { credentials: 'include' });
     if (!roamResp.ok) return { ok: false, reason: 'roam_failed' };
 
-    cachedCsrf = null; // the new session has a new token
+    resetSessionCache(); // the new session has a new token
     return { ok: true, reason: 'restored' };
   } catch (e) {
     console.warn('Silent login failed:', e);
@@ -233,6 +239,8 @@ export {
   LOGIN_URL,
   LOGIN_SUCCESS_PATH,
   STUDENT_PAGE,
+  SessionExpiredError,
+  resetSessionCache,
   isSessionValid,
   isStudentPageUrl,
   extractCsrfFromHtml,

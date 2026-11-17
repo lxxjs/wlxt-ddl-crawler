@@ -14,7 +14,10 @@
  * (state in chrome.storage.local) instead of awaiting a long promise.
  */
 
-import { isSessionValid, trySilentLogin, LOGIN_SUCCESS_PATH, LOGIN_URL } from '../lib/auth.js';
+import {
+  isSessionValid, trySilentLogin, resetSessionCache, SessionExpiredError,
+  LOGIN_SUCCESS_PATH, LOGIN_URL,
+} from '../lib/auth.js';
 import { getAllHomework } from '../lib/api.js';
 import {
   saveHomeworkCache, getHomeworkCache, getSettings, getCredentials, clampInterval,
@@ -207,21 +210,43 @@ function refreshHomework(options) {
   return inFlightRefresh;
 }
 
+/**
+ * Fetch homework; if the API rejects the session even though the student
+ * page looked fine, get a fresh token (re-logging in silently if needed)
+ * and try exactly once more.
+ */
+async function fetchHomeworkWithRetry() {
+  try {
+    return await getAllHomework();
+  } catch (e) {
+    if (!(e instanceof SessionExpiredError)) throw e;
+    console.warn('API rejected the session, retrying with a fresh token:', e.message);
+
+    resetSessionCache();
+    if (!(await isSessionValid())) {
+      await trySilentLogin();
+      if (!(await isSessionValid())) throw e;
+    }
+    return await getAllHomework();
+  }
+}
+
+async function reportSessionExpired(pending) {
+  const error = pending ? 'logging_in' : 'session_expired';
+  updateBadge('!', RED);
+  await saveRefreshStatus(error);
+  if (!pending) await notifyLoginRequired();
+  return { success: false, error };
+}
+
 async function doRefresh({ manual = false } = {}) {
   try {
     const session = await ensureSession({ manual });
-
-    if (!session.ok) {
-      const error = session.pending ? 'logging_in' : 'session_expired';
-      updateBadge('!', RED);
-      await saveRefreshStatus(error);
-      if (!session.pending) await notifyLoginRequired();
-      return { success: false, error };
-    }
+    if (!session.ok) return await reportSessionExpired(session.pending);
 
     // Session is valid and CSRF token is now cached by isSessionValid()
     const previous = await getHomeworkCache();
-    const { homework, failedCourses } = await getAllHomework();
+    const { homework, failedCourses } = await fetchHomeworkWithRetry();
 
     // Courses that failed keep what we last knew about them.
     const merged = mergeWithPrevious(homework, previous?.homework, failedCourses.map(c => c.id));
@@ -235,6 +260,12 @@ async function doRefresh({ manual = false } = {}) {
     return { success: true, homework: merged, failedCourses: failedNames };
   } catch (e) {
     // Keep the previous cache: a failed refresh must not look like "no homework".
+    if (e instanceof SessionExpiredError) {
+      // Still rejected after a fresh token. Ask the user rather than opening
+      // login tabs in a loop: a tab login would "succeed" and land here again.
+      console.warn('Session rejected by the API:', e.message);
+      return await reportSessionExpired(false).catch(() => ({ success: false, error: 'session_expired' }));
+    }
     console.error('Refresh failed:', e);
     updateBadge('!', RED);
     await saveRefreshStatus(e.message).catch(() => {});

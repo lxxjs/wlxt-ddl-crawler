@@ -23,6 +23,8 @@ const world = {
   loggedIn: true,
   ssoRemembered: false,
   courseApiBroken: false,
+  loggedOutPageIs200: false, // logged-out student page answers 200 without a token
+  apiRejections: 0,          // number of upcoming API calls to answer with 403
   failingCourses: new Set(),
   courses: [
     { wlkcid: 'c1', kcm: '高等数学', jsm: '张伟' },
@@ -54,9 +56,8 @@ globalThis.fetch = async (input, init = {}) => {
   world.requests.push(`${init.method || 'GET'} ${path}`);
 
   if (path === STUDENT_PAGE) {
-    return world.loggedIn
-      ? respond(STUDENT_PAGE, '<a href="/f/wlxt/x?a=1&_csrf=TOKEN-1">课程</a>')
-      : loginPage();
+    if (world.loggedIn) return respond(STUDENT_PAGE, '<a href="/f/wlxt/x?a=1&_csrf=TOKEN-1">课程</a>');
+    return world.loggedOutPageIs200 ? respond(STUDENT_PAGE, '<html>请登录</html>') : loginPage();
   }
   if (path === LOGIN_URL) return loginPage();
 
@@ -71,8 +72,16 @@ globalThis.fetch = async (input, init = {}) => {
     return respond(STUDENT_PAGE, 'ok');
   }
 
-  // Everything below is the JSON API: logged-out users get the login page.
-  if (!world.loggedIn) return respond(`${LEARN}/f/login?login_timeout=1`, '<html>login</html>');
+  // Everything below is the JSON API. Logged-out users get a 403 or the login page.
+  if (world.apiRejections > 0) {
+    world.apiRejections -= 1;
+    return respond(url, 'Forbidden', 403);
+  }
+  if (!world.loggedIn) {
+    return world.loggedOutPageIs200
+      ? respond(url, 'Forbidden', 403)
+      : respond(`${LEARN}/f/login?login_timeout=1`, '<html>login</html>');
+  }
   assert.ok(url.includes('_csrf=TOKEN-1'), `CSRF token missing on ${url}`);
 
   if (path.endsWith('/getCurrentAndNextSemester')) {
@@ -375,6 +384,45 @@ await test('auto login switched off → no tab even with credentials', async () 
   const result = await refresh();
   assert.equal(result.error, 'session_expired');
   assert.equal(seen.createdTabs.length, count);
+});
+
+// ─── Logged-out detection (found on the live site) ───────────────────────────
+
+console.log('\nlogged-out detection');
+
+await test('student page answering 200 without a token is NOT a session', async () => {
+  world.loggedIn = false;
+  world.loggedOutPageIs200 = true;
+  const mark = world.requests.length;
+
+  const result = await refresh();
+  assert.equal(result.error, 'session_expired'); // not "HTTP 403 from …"
+  assert.equal(world.requests.slice(mark).some(r => r.includes('/b/')), false,
+    'no API call may be made without a token');
+  assert.equal(store.homeworkCache.homework.length, 2);
+  world.loggedOutPageIs200 = false;
+});
+
+await test('API answering 403 once is retried with a fresh token', async () => {
+  world.loggedIn = true;
+  world.apiRejections = 1;
+  const result = await refresh();
+  assert.equal(result.success, true);
+  assert.equal(result.homework.length, 2);
+});
+
+await test('API answering 403 persistently → ask the user, no login-tab loop', async () => {
+  store.settings = { refreshInterval: 30, notifications: true, autoLogin: true };
+  store.autoLoginState = { pendingTabId: null, submitted: false, lastAttemptAt: 0, failures: 0 };
+  world.apiRejections = Infinity;
+  const tabs = seen.createdTabs.length;
+
+  const result = await refresh();
+  assert.equal(result.error, 'session_expired');
+  assert.equal(seen.createdTabs.length, tabs);
+  assert.equal(store.homeworkCache.homework.length, 2);
+  assert.equal(seen.badge, '!');
+  world.apiRejections = 0;
 });
 
 // ─── Summary ─────────────────────────────────────────────────────────────────

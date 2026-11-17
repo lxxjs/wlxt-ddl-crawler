@@ -233,6 +233,11 @@ test('semester id is read from result.id', () => {
   assert.equal(parseSemesterResponse(data), '2026-2027-1');
 });
 
+test('semester id falls back to result.xnxq', () => {
+  const data = { result: { xnxq: '2026-2027-1', xnxqmc: '2026-2027秋季学期', kssj: '2026-09-12' } };
+  assert.equal(parseSemesterResponse(data), '2026-2027-1');
+});
+
 test('unexpected semester response throws', () => {
   assert.throws(() => parseSemesterResponse({ message: 'error' }));
   assert.throws(() => parseSemesterResponse(null));
